@@ -67,8 +67,12 @@
 - [x] Versione mobile della dashboard V.A.U.L.T. (responsive layout)
 - [x] Menu mobile collassabile per navigazione
 - [x] Nebulosa ridimensionata per mobile
-- [ ] Implementare trigger reali verso NotificationCenter per eventi chat, escalation rosse e KB updates
-- [ ] Aggiungere notifiche escalation automatiche nel flusso chat.send con alert visivo e suono
-- [ ] Collegare Home/Chat page per generare notifiche per risposte importanti
-- [ ] Aggiungere notifiche automatiche dopo create/update/crawl della knowledge base
-- [ ] Implementare pannello preferenze notifiche (suono on/off, tipi abilitati, comportamento) con persistenza
+- [x] Implementare trigger reali verso NotificationCenter per eventi chat, escalation rosse e KB updates
+- [x] Aggiungere notifiche escalation automatiche nel flusso chat.send con alert visivo e suono
+- [x] Collegare Home/Chat page per generare notifiche per risposte importanti
+- [x] Aggiungere notifiche automatiche dopo create/update/crawl della knowledge base (via endpoint API)
+- [x] Implementare pannello preferenze notifiche (suono on/off, tipi abilitati, comportamento) con persistenza
+- [ ] Collegare anche Chat.tsx al NotificationCenter per notifiche su risposte importanti
+- [ ] Aggiungere trigger notifiche KB nelle mutation create/update/delete knowledge
+- [ ] Aggiungere trigger notifiche nel crawl handler per aggiornamenti automatici
+- [ ] Implementare UI preferenze notifiche (suono on/off, tipi abilitati) con persistenza

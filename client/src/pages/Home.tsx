@@ -103,6 +103,23 @@ export default function Home() {
       setLastResponse(data.message);
       setShowResponseModal(true);
       setNebulaState("idle");
+
+      // Trigger notifications based on risk level
+      const notificationMap: Record<string, { type: string; title: string; message: string }> = {
+        "red": { type: "escalation", title: "🔴 Escalation Richiesta", message: "La tua richiesta è stata inoltrata a un operatore umano." },
+        "yellow": { type: "warning", title: "⚠️ Verifica Necessaria", message: "Questa informazione potrebbe richiedere verifica. Contatta l'ufficio per conferma." },
+        "green": { type: "success", title: "✓ Risposta Disponibile", message: "Ho trovato le informazioni che cercavi." },
+      };
+      if (data.riskLevel && notificationMap[data.riskLevel]) {
+        const notif = notificationMap[data.riskLevel];
+        (window as any).adamNotifications?.add({
+          type: notif.type,
+          title: notif.title,
+          message: notif.message,
+          sound: data.riskLevel === "red",
+        });
+      }
+      // Notify response type for nebula color
       if (data.responseType) {
         const colorMap: Record<string, NebulaState> = {
           "in-ascolto": "idle",
