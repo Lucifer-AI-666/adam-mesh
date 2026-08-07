@@ -361,6 +361,22 @@ export const appRouter = router({
       }),
   }),
 
+  // ============ NOTIFICATIONS ============
+  notifications: router({
+    send: adminProcedure
+      .input(z.object({
+        type: z.enum(["info", "warning", "error", "success", "escalation"]),
+        title: z.string(),
+        message: z.string(),
+        actionUrl: z.string().optional(),
+        sound: z.boolean().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        console.log("[Notification]", input);
+        return { success: true, id: Math.random().toString(36).substr(2, 9) };
+      }),
+  }),
+
   // ============ KNOWLEDGE BASE ============
   knowledge: router({
     list: adminProcedure.query(async () => {
