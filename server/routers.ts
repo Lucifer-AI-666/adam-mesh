@@ -248,7 +248,7 @@ export const appRouter = router({
     /** Generate speech audio from text using Gemini TTS */
     speak: publicProcedure
       .input(z.object({
-        text: z.string().min(1).max(2000),
+        text: z.string().min(1).max(5000),
         voice: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
