@@ -102,13 +102,18 @@ describe("ADAM - Knowledge Base", () => {
 });
 
 describe("ADAM - Analytics", () => {
-  it("rejects analytics for non-admin", async () => {
+  // analytics.stats is publicProcedure (Home/Dashboard use it for authenticated users).
+  it("allows analytics stats for operator", async () => {
     const ctx = createAuthContext("operator");
     const caller = appRouter.createCaller(ctx);
-    await expect(caller.analytics.stats()).rejects.toThrow();
+    const result = await caller.analytics.stats();
+    expect(result).toHaveProperty("total");
+    expect(result).toHaveProperty("green");
+    expect(result).toHaveProperty("yellow");
+    expect(result).toHaveProperty("red");
   });
 
-  it("allows analytics for admin", async () => {
+  it("allows analytics stats for admin", async () => {
     const ctx = createAuthContext("admin");
     const caller = appRouter.createCaller(ctx);
     const result = await caller.analytics.stats();
@@ -116,5 +121,11 @@ describe("ADAM - Analytics", () => {
     expect(result).toHaveProperty("green");
     expect(result).toHaveProperty("yellow");
     expect(result).toHaveProperty("red");
+  });
+
+  it("rejects crawl logs for non-admin", async () => {
+    const ctx = createAuthContext("operator");
+    const caller = appRouter.createCaller(ctx);
+    await expect(caller.analytics.crawlLogs()).rejects.toThrow();
   });
 });

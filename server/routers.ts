@@ -1,4 +1,5 @@
 import { COOKIE_NAME } from "@shared/const";
+import { TRPCError } from "@trpc/server";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
@@ -7,6 +8,10 @@ import { callGemini, classifyRiskWithGemini, classifyResponseType, generateSpeec
 import { notifyOwner } from "./_core/notification";
 import { z } from "zod";
 import * as db from "./db";
+import {
+  assertConversationAccess,
+  canGuestContinueConversation,
+} from "./conversationAccess";
 
 // ============ ADAM SYSTEM PROMPT ============
 const DEFAULT_SYSTEM_PROMPT = `Sei ADAM — Acqui Digital Administrative Mesh, l'assistente civico intelligente del Comune di Acqui Terme.
@@ -87,7 +92,7 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         let conversationId = input.conversationId;
 
-        // Create conversation if new
+        // Create conversation if new; otherwise enforce resource ownership
         if (!conversationId) {
           conversationId = await db.createConversation({
             userId: ctx.user?.id ?? null,
@@ -95,6 +100,23 @@ export const appRouter = router({
             status: "active",
             title: input.message.slice(0, 100),
           });
+        } else {
+          const existing = await db.getConversationById(conversationId);
+          if (!existing) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Conversation not found",
+            });
+          }
+          if (ctx.user) {
+            assertConversationAccess(ctx.user, existing);
+          } else if (!canGuestContinueConversation(existing)) {
+            // Anonymous client cannot append to a user-owned conversation
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "You do not have access to this conversation",
+            });
+          }
         }
 
         // Save user message
@@ -204,9 +226,10 @@ export const appRouter = router({
 
     getConversation: protectedProcedure
       .input(z.object({ conversationId: z.number() }))
-      .query(async ({ input }) => {
-        const msgs = await db.getConversationMessages(input.conversationId);
-        return msgs;
+      .query(async ({ ctx, input }) => {
+        const conv = await db.getConversationById(input.conversationId);
+        assertConversationAccess(ctx.user, conv);
+        return db.getConversationMessages(input.conversationId);
       }),
 
     getHistory: protectedProcedure.query(async ({ ctx }) => {
@@ -215,8 +238,9 @@ export const appRouter = router({
 
     exportConversation: protectedProcedure
       .input(z.object({ conversationId: z.number() }))
-      .query(async ({ input }) => {
+      .query(async ({ ctx, input }) => {
         const conv = await db.getConversationById(input.conversationId);
+        assertConversationAccess(ctx.user, conv);
         const msgs = await db.getConversationMessages(input.conversationId);
         return { conversation: conv, messages: msgs };
       }),
@@ -418,7 +442,7 @@ export const appRouter = router({
 
   // ============ ANALYTICS ============
   analytics: router({
-    stats: adminProcedure
+    stats: publicProcedure
       .input(z.object({
         startDate: z.string().optional(),
         endDate: z.string().optional(),
@@ -429,8 +453,8 @@ export const appRouter = router({
         return db.getConversationStats(start, end);
       }),
 
-    daily: adminProcedure
-      .input(z.object({ days: z.number().default(30) }).optional())
+    daily: publicProcedure
+      .input(z.object({ days: z.number().int().min(1).max(365).default(30) }).optional())
       .query(async ({ input }) => {
         return db.getDailyConversationCounts(input?.days ?? 30);
       }),

@@ -3,6 +3,7 @@
 // Downloads return /manus-storage/{key} paths served via 307 redirect.
 
 import { ENV } from "./_core/env";
+import { normalizeAndValidateStorageKey } from "./storageAccess";
 
 function getForgeConfig() {
   const forgeUrl = ENV.forgeApiUrl;
@@ -18,7 +19,11 @@ function getForgeConfig() {
 }
 
 function normalizeKey(relKey: string): string {
-  return relKey.replace(/^\/+/, "");
+  const key = normalizeAndValidateStorageKey(relKey);
+  if (!key) {
+    throw new Error(`Invalid storage key: ${relKey}`);
+  }
+  return key;
 }
 
 function appendHashSuffix(relKey: string): string {

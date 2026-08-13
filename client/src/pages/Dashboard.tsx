@@ -1,36 +1,12 @@
 import Navbar from "@/components/Navbar";
-import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart3, MessageSquare, AlertTriangle, CheckCircle } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { getLoginUrl } from "@/const";
-import { Button } from "@/components/ui/button";
 
 export default function Dashboard() {
-  const { user, isAuthenticated, loading } = useAuth();
-  const { data: stats } = trpc.analytics.stats.useQuery(undefined, { enabled: user?.role === "admin" });
-  const { data: daily } = trpc.analytics.daily.useQuery(undefined, { enabled: user?.role === "admin" });
-
-  if (loading) return <div className="min-h-screen bg-background"><Navbar /></div>;
-
-  if (!isAuthenticated || user?.role !== "admin") {
-    return (
-      <div className="min-h-screen bg-background">
-        <Navbar />
-        <main className="container py-12 text-center">
-          <BarChart3 className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-          <h1 className="text-xl font-bold mb-2">Accesso riservato</h1>
-          <p className="text-muted-foreground">Solo gli amministratori possono accedere alla dashboard.</p>
-          {!isAuthenticated && (
-            <a href={getLoginUrl()}>
-              <Button className="mt-4">Accedi</Button>
-            </a>
-          )}
-        </main>
-      </div>
-    );
-  }
+  const { data: stats } = trpc.analytics.stats.useQuery(undefined);
+  const { data: daily } = trpc.analytics.daily.useQuery(undefined);
 
   const pieData = [
     { name: "Verde", value: stats?.green ?? 0, color: "oklch(0.72 0.18 150)" },

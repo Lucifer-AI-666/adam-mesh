@@ -80,9 +80,10 @@ export async function generateImage(
   const base64Data = result.image.b64Json;
   const buffer = Buffer.from(base64Data, "base64");
 
-  // Save to S3
+  // Save under public/ so authenticated clients can load via storage proxy
+  // (generated/ without user namespace is staff-only after AuthZ hardening).
   const { url } = await storagePut(
-    `generated/${Date.now()}.png`,
+    `public/generated/${Date.now()}.png`,
     buffer,
     result.image.mimeType
   );
