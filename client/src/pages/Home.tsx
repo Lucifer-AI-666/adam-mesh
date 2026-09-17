@@ -36,6 +36,10 @@ export default function Home() {
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
+  useEffect(() => {
+    document.title = "ADAM Acqui Terme | Assistente Civico Intelligente";
+  }, []);
+
   // Stats query
   const { data: stats } = trpc.analytics.stats.useQuery(undefined, {
     enabled: isAuthenticated,
@@ -278,6 +282,7 @@ export default function Home() {
 
         {/* Center - Nebula */}
         <main className="flex-1 flex flex-col items-center justify-center relative">
+          <h2 className="sr-only">Assistente civico intelligente per Acqui Terme</h2>
           <CosmicNebula state={nebulaState} size={420} />
 
           {/* Response preview - click to expand */}
@@ -518,6 +523,7 @@ function HomeMobile({ user, isAuthenticated, stats, nebulaState, inputText, setI
 
       {/* Main content */}
       <main className="flex-1 flex flex-col items-center justify-center relative px-4 pb-24">
+        <h2 className="sr-only">Assistente civico intelligente per Acqui Terme</h2>
         <CosmicNebula state={nebulaState} size={240} />
 
         {/* Response preview */}
