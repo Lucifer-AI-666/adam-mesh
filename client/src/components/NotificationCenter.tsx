@@ -140,12 +140,13 @@ export function NotificationCenter({ onNotification }: NotificationCenterProps) 
   };
 
   return (
-    <div className="fixed bottom-6 right-6 z-40 space-y-3">
+    <>
       {/* Toast notifications (first 3) */}
+      <div className="fixed bottom-6 right-6 z-40 space-y-3 pointer-events-none">
       {notifications.slice(0, 3).map((notification) => (
         <div
           key={notification.id}
-          className={`w-80 border rounded-lg p-3 backdrop-blur-sm ${getBackgroundColor(
+          className={`pointer-events-auto w-80 border rounded-lg p-3 backdrop-blur-sm ${getBackgroundColor(
             notification.type
           )} animate-in slide-in-from-right`}
         >
@@ -176,11 +177,13 @@ export function NotificationCenter({ onNotification }: NotificationCenterProps) 
           </div>
         </div>
       ))}
+      </div>
 
-      {/* Notification center button */}
+      {/* Notification center button: accanto al brand nella barra superiore */}
       <button
         onClick={() => setShowCenter(!showCenter)}
-        className="relative w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 transition-all"
+        aria-label="Apri notifiche"
+        className="fixed top-3 left-[100px] md:top-4 md:left-[430px] z-50 relative w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 transition-all"
       >
         <Bell className="h-5 w-5 text-white/60" />
         {unreadCount > 0 && (
@@ -192,7 +195,7 @@ export function NotificationCenter({ onNotification }: NotificationCenterProps) 
 
       {/* Notification center panel */}
       {showCenter && (
-        <div className="fixed bottom-24 right-6 w-96 max-h-96 bg-white/5 border border-white/10 rounded-lg backdrop-blur-sm flex flex-col">
+        <div className="fixed top-16 left-3 right-3 md:top-20 md:left-[430px] md:right-auto w-auto md:w-96 max-h-96 z-50 bg-white/5 border border-white/10 rounded-lg backdrop-blur-sm flex flex-col">
           <div className="flex items-center justify-between p-4 border-b border-white/5">
             <h3 className="text-sm font-mono text-white/70">Notifiche</h3>
             <div className="flex items-center gap-2">
@@ -283,6 +286,6 @@ export function NotificationCenter({ onNotification }: NotificationCenterProps) 
           )}
         </div>
       )}
-    </div>
+    </>
   );
 }
