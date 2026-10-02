@@ -1,5 +1,6 @@
 import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
+import NotificationCenter from "@/components/NotificationCenter";
 import { getLoginUrl } from "@/const";
 import { cn } from "@/lib/utils";
 import { Menu, X, MessageSquare, Map, History, BarChart3, AlertTriangle, Database, BookOpen, LogOut, Zap } from "lucide-react";
@@ -64,7 +65,8 @@ export default function Navbar() {
               </Button>
             </Link>
           ))}
-          <div className="ml-2 border-l border-border pl-2">
+          <div className="ml-2 border-l border-border pl-2 flex items-center gap-1">
+            <NotificationCenter />
             {isAuthenticated ? (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground hidden lg:inline">{user?.name || "Utente"}</span>

@@ -13,11 +13,20 @@ import { Plus, Trash2, BookOpen, CheckCircle, ExternalLink } from "lucide-react"
 import { useState } from "react";
 import { toast } from "sonner";
 import { getLoginUrl } from "@/const";
+import { useNotifications } from "@/contexts/NotificationContext";
 
 export default function AdminKnowledge() {
   const { user, isAuthenticated, loading } = useAuth();
+  const { addNotification } = useNotifications();
   const { data: entries, refetch } = trpc.knowledge.list.useQuery(undefined, { enabled: user?.role === "admin" });
-  const createMutation = trpc.knowledge.create.useMutation({ onSuccess: () => { toast.success("Voce aggiunta"); refetch(); setDialogOpen(false); } });
+  const createMutation = trpc.knowledge.create.useMutation({
+    onSuccess: (_data, variables) => {
+      toast.success("Voce aggiunta");
+      addNotification("knowledge_update", "Knowledge base aggiornata", `Nuova voce aggiunta: "${variables.title}"`);
+      refetch();
+      setDialogOpen(false);
+    },
+  });
   const deleteMutation = trpc.knowledge.delete.useMutation({ onSuccess: () => { toast.success("Voce eliminata"); refetch(); } });
 
   const [dialogOpen, setDialogOpen] = useState(false);

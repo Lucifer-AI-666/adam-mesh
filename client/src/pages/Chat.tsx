@@ -8,6 +8,7 @@ import { useParams } from "wouter";
 import { Mic, MicOff, Volume2, VolumeX, Send, Loader2, Bot, User } from "lucide-react";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
+import { useNotifications, NOTIFICATION_MESSAGE_MAX_LENGTH } from "@/contexts/NotificationContext";
 
 function RiskBadge({ level }: { level?: string | null }) {
   if (!level) return null;
@@ -29,6 +30,7 @@ interface ChatMessage {
 
 export default function Chat() {
   const params = useParams<{ id?: string }>();
+  const { addNotification } = useNotifications();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<number | undefined>(
     params.id ? parseInt(params.id) : undefined
@@ -67,6 +69,19 @@ export default function Chat() {
         ...prev,
         { role: "assistant", content: data.message, riskLevel: data.riskLevel },
       ]);
+      if (data.riskLevel === "red") {
+        addNotification(
+          "escalation_red",
+          "🔴 Escalation attivata",
+          "La tua richiesta è stata inoltrata a un operatore umano."
+        );
+      } else {
+        addNotification(
+          "new_message",
+          "Risposta da ADAM",
+          data.message.slice(0, NOTIFICATION_MESSAGE_MAX_LENGTH) + (data.message.length > NOTIFICATION_MESSAGE_MAX_LENGTH ? "…" : "")
+        );
+      }
       // Auto-speak response with Gemini TTS
       if (ttsEnabled && data.message) {
         speakText(data.message);

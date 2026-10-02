@@ -10,9 +10,11 @@ import {
   Send, Mic, MicOff, Volume2, ArrowRight, Activity,
   Users, FileText, Globe, X, Menu, ChevronDown
 } from "lucide-react";
+import { useNotifications, NOTIFICATION_MESSAGE_MAX_LENGTH } from "@/contexts/NotificationContext";
 
 export default function Home() {
   const { user, isAuthenticated } = useAuth();
+  const { addNotification } = useNotifications();
   const [nebulaState, setNebulaState] = useState<NebulaState>("idle");
   const [inputText, setInputText] = useState("");
   const [lastResponse, setLastResponse] = useState("");
@@ -103,6 +105,19 @@ export default function Home() {
       setLastResponse(data.message);
       setShowResponseModal(true);
       setNebulaState("idle");
+      if (data.riskLevel === "red") {
+        addNotification(
+          "escalation_red",
+          "🔴 Escalation attivata",
+          "La tua richiesta è stata inoltrata a un operatore umano."
+        );
+      } else {
+        addNotification(
+          "new_message",
+          "Risposta da ADAM",
+          data.message.slice(0, NOTIFICATION_MESSAGE_MAX_LENGTH) + (data.message.length > NOTIFICATION_MESSAGE_MAX_LENGTH ? "…" : "")
+        );
+      }
       if (data.responseType) {
         const colorMap: Record<string, NebulaState> = {
           "in-ascolto": "idle",

@@ -58,11 +58,11 @@
 - [x] Controllo velocità audio (1x, 1.5x, 2x)
 - [x] Caching audio per evitare di rigenerare se la risposta è uguale
 - [x] Fix errore link annidati nella Home page (NavBtn)
-- [ ] Notifiche personalizzate: sistema di notifiche in-app (toast, banner, modal)
-- [ ] Notifiche per escalation rossa: alert visivo + suono
-- [ ] Notifiche per nuovi messaggi nella chat
-- [ ] Notifiche per aggiornamenti knowledge base
-- [ ] Centro notifiche: cronologia e gestione preferenze
+- [x] Notifiche personalizzate: sistema di notifiche in-app (toast, banner, modal)
+- [x] Notifiche per escalation rossa: alert visivo + suono
+- [x] Notifiche per nuovi messaggi nella chat
+- [x] Notifiche per aggiornamenti knowledge base
+- [x] Centro notifiche: cronologia e gestione preferenze
 - [x] Migliorare visibilità testo risposta (modal full-screen con scroll)
 - [x] Versione mobile della dashboard V.A.U.L.T. (responsive layout)
 - [x] Menu mobile collassabile per navigazione
