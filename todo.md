@@ -70,8 +70,8 @@
 - [x] Implementare trigger reali verso NotificationCenter per eventi chat, escalation rosse e KB updates
 - [x] Aggiungere notifiche escalation automatiche nel flusso chat.send con alert visivo e suono
 - [x] Collegare Home/Chat page per generare notifiche per risposte importanti
-- [x] Aggiungere notifiche automatiche dopo create/update/crawl della knowledge base (via endpoint API)
-- [x] Implementare pannello preferenze notifiche (suono on/off, tipi abilitati, comportamento) con persistenza
+- [ ] Aggiungere notifiche automatiche dopo create/update/crawl della knowledge base (via endpoint API)
+- [ ] Implementare pannello preferenze notifiche (suono on/off, tipi abilitati, comportamento) con persistenza
 - [x] Collegare anche Chat.tsx al NotificationCenter per notifiche su risposte importanti
 - [x] Aggiungere trigger notifiche KB nelle mutation create/update/delete knowledge (via endpoint API)
 - [x] Aggiungere trigger notifiche nel crawl handler per aggiornamenti automatici (via endpoint API)
