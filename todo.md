@@ -61,18 +61,19 @@
 - [x] Notifiche personalizzate: sistema di notifiche in-app (toast, banner, modal)
 - [x] Notifiche per escalation rossa: alert visivo + suono
 - [x] Notifiche per nuovi messaggi nella chat
-- [x] Notifiche per aggiornamenti knowledge base
-- [x] Centro notifiche: cronologia e gestione preferenze
+- [ ] Notifiche per aggiornamenti knowledge base
+- [x] Centro notifiche: cronologia
+- [ ] Preferenze del centro notifiche
 - [x] Migliorare visibilità testo risposta (modal full-screen con scroll)
 - [x] Versione mobile della dashboard V.A.U.L.T. (responsive layout)
 - [x] Menu mobile collassabile per navigazione
 - [x] Nebulosa ridimensionata per mobile
-- [x] Implementare trigger reali verso NotificationCenter per eventi chat, escalation rosse e KB updates
+- [x] Implementare trigger reali verso NotificationCenter per eventi chat ed escalation rosse
 - [x] Aggiungere notifiche escalation automatiche nel flusso chat.send con alert visivo e suono
 - [x] Collegare Home/Chat page per generare notifiche per risposte importanti
 - [ ] Aggiungere notifiche automatiche dopo create/update/crawl della knowledge base (via endpoint API)
 - [ ] Implementare pannello preferenze notifiche (suono on/off, tipi abilitati, comportamento) con persistenza
 - [x] Collegare anche Chat.tsx al NotificationCenter per notifiche su risposte importanti
-- [x] Aggiungere trigger notifiche KB nelle mutation create/update/delete knowledge (via endpoint API)
-- [x] Aggiungere trigger notifiche nel crawl handler per aggiornamenti automatici (via endpoint API)
-- [x] Implementare UI preferenze notifiche (suono on/off, tipi abilitati) con persistenza (nel NotificationCenter)
+- [ ] Aggiungere trigger notifiche KB nelle mutation create/update/delete knowledge (via endpoint API)
+- [ ] Aggiungere trigger notifiche nel crawl handler per aggiornamenti automatici (via endpoint API)
+- [ ] Implementare UI preferenze notifiche (suono on/off, tipi abilitati) con persistenza

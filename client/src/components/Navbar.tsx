@@ -2,6 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { getLoginUrl } from "@/const";
 import { cn } from "@/lib/utils";
+import { NotificationCenterControl } from "@/components/NotificationCenter";
 import { Menu, X, MessageSquare, Map, History, BarChart3, AlertTriangle, Database, BookOpen, LogOut, Zap } from "lucide-react";
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
@@ -45,10 +46,13 @@ export default function Navbar() {
   return (
     <nav className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-md">
       <div className="container flex h-14 items-center justify-between">
-        <Link href="/" className="flex items-center gap-2 font-bold text-lg tracking-tight">
-          <span className="text-primary">ADAM</span>
-          <span className="hidden sm:inline text-muted-foreground text-sm font-normal">Acqui Digital Mesh</span>
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link href="/" className="flex items-center gap-2 font-bold text-lg tracking-tight">
+            <span className="text-primary">ADAM</span>
+            <span className="hidden sm:inline text-muted-foreground text-sm font-normal">Acqui Digital Mesh</span>
+          </Link>
+          <NotificationCenterControl />
+        </div>
 
         {/* Desktop nav */}
         <div className="hidden md:flex items-center gap-1">

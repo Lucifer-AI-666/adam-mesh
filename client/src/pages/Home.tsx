@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import CosmicNebula, { type NebulaState } from "@/components/CosmicNebula";
+import { NotificationCenterControl } from "@/components/NotificationCenter";
 import { useState, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import {
@@ -224,9 +225,10 @@ export default function Home() {
       }} />
 
       {/* Top bar */}
-      <header className="relative z-10 flex items-center justify-between px-6 py-4 border-b border-white/5">
+      <header className="relative z-30 flex items-center justify-between px-6 py-4 border-b border-white/5">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold tracking-[0.15em] text-primary font-mono">A.D.A.M.</h1>
+          <NotificationCenterControl />
           <span className="text-[10px] text-white/30 font-mono uppercase tracking-wider">
             Acqui Digital Administrative Mesh
           </span>
@@ -515,6 +517,7 @@ function HomeMobile({ user, isAuthenticated, stats, nebulaState, inputText, setI
       <header className="border-b border-white/5 p-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-bold text-primary font-mono">A.D.A.M.</h1>
+          <NotificationCenterControl />
         </div>
         <div className="text-right font-mono text-[10px]">
           <div className="text-white/90">{timeStr}</div>
