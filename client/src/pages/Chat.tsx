@@ -67,6 +67,23 @@ export default function Chat() {
         ...prev,
         { role: "assistant", content: data.message, riskLevel: data.riskLevel },
       ]);
+
+      // Trigger notifications based on risk level
+      const notifMap: Record<string, any> = {
+        "red": { type: "escalation", title: "Escalation Richiesta", message: "La tua richiesta è stata inoltrata a un operatore umano." },
+        "yellow": { type: "warning", title: "Verifica Necessaria", message: "Questa informazione potrebbe richiedere verifica." },
+        "green": { type: "success", title: "Risposta Disponibile", message: "Ho trovato le informazioni che cercavi." },
+      };
+      if (data.riskLevel && notifMap[data.riskLevel]) {
+        const notif = notifMap[data.riskLevel];
+        (window as any).adamNotifications?.add({
+          type: notif.type,
+          title: notif.title,
+          message: notif.message,
+          sound: data.riskLevel === "red",
+        });
+      }
+
       // Auto-speak response with Gemini TTS
       if (ttsEnabled && data.message) {
         speakText(data.message);
