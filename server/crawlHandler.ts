@@ -1,8 +1,20 @@
 import type { Request, Response } from "express";
-import { sdk } from "./_core/sdk";
+import { timingSafeEqual } from "node:crypto";
+import { ENV } from "./_core/env";
 import { invokeLLM } from "./_core/llm";
 import { addKnowledgeEntry, addCrawlLog } from "./db";
 import { notifyOwner } from "./_core/notification";
+
+const CRON_TASK_ID = "external-cron";
+
+// Scheduled crawls authenticate with `Authorization: Bearer <CRON_SECRET>`; disabled when unset.
+function isAuthorizedCron(req: Request): boolean {
+  if (!ENV.cronSecret) return false;
+  const header = req.headers.authorization ?? "";
+  const provided = Buffer.from(header.startsWith("Bearer ") ? header.slice(7).trim() : "");
+  const expected = Buffer.from(ENV.cronSecret);
+  return provided.length === expected.length && timingSafeEqual(provided, expected);
+}
 
 // URLs to crawl from the Comune di Acqui Terme official site
 const CRAWL_URLS = [
@@ -88,8 +100,7 @@ Se non ci sono informazioni utili, restituisci un array vuoto [].`
 export async function crawlHandler(req: Request, res: Response) {
   try {
     // Authenticate the cron request
-    const user = await sdk.authenticateRequest(req);
-    if (!user.isCron || !user.taskUid) {
+    if (!isAuthorizedCron(req)) {
       return res.status(403).json({ error: "cron-only" });
     }
 
@@ -127,7 +138,7 @@ export async function crawlHandler(req: Request, res: Response) {
           url,
           status: "success",
           entriesAdded: added,
-          scheduleCronTaskUid: user.taskUid,
+          scheduleCronTaskUid: CRON_TASK_ID,
         });
         totalAdded += added;
       } catch (err: any) {
@@ -135,7 +146,7 @@ export async function crawlHandler(req: Request, res: Response) {
           url,
           status: "error",
           errorMessage: err?.message || "Unknown error",
-          scheduleCronTaskUid: user.taskUid,
+          scheduleCronTaskUid: CRON_TASK_ID,
         });
         totalErrors++;
       }

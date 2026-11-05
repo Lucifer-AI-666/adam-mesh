@@ -1,4 +1,5 @@
 import { eq, desc, sql, and, gte, lte, count } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, civicNodes, conversations, messages, escalations, knowledgeBase, crawlLogs, systemSettings } from "../drizzle/schema";
 import type { InsertCivicNode, InsertConversation, InsertMessage, InsertEscalation, InsertKnowledgeEntry, InsertCrawlLog } from "../drizzle/schema";
@@ -57,6 +58,47 @@ export async function getUserByOpenId(openId: string) {
   if (!db) return undefined;
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
   return result.length > 0 ? result[0] : undefined;
+}
+
+export class DuplicateEmailError extends Error {
+  constructor() {
+    super("Email already registered");
+  }
+}
+
+export async function getUserByEmail(email: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.email, email)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function createLocalUser(input: { email: string; name: string; passwordHash: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const openId = `local_${randomUUID()}`;
+  try {
+    await db.insert(users).values({
+      openId,
+      email: input.email,
+      name: input.name,
+      passwordHash: input.passwordHash,
+      loginMethod: "password",
+      role: ENV.ownerEmail && input.email === ENV.ownerEmail ? "admin" : "user",
+      lastSignedIn: new Date(),
+    });
+  } catch (error) {
+    const code = (error as { code?: string; cause?: { code?: string } });
+    if (code?.code === "ER_DUP_ENTRY" || code?.cause?.code === "ER_DUP_ENTRY") {
+      throw new DuplicateEmailError();
+    }
+    throw error;
+  }
+
+  const created = await getUserByOpenId(openId);
+  if (!created) throw new Error("Failed to load created user");
+  return created;
 }
 
 // ============ CIVIC NODES ============
