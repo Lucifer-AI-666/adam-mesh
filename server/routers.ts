@@ -245,14 +245,14 @@ export const appRouter = router({
         return { conversation: conv, messages: msgs };
       }),
 
-    /** Generate speech audio from text using Gemini TTS */
+    /** Voce xAI, PCM 24 kHz. Il testo lungo viene spezzato in frasi. */
     speak: publicProcedure
       .input(z.object({
-        text: z.string().min(1).max(2000),
+        text: z.string().min(1).max(8000),
         voice: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
-        const audioBase64 = await generateSpeech(input.text, input.voice || "Orus");
+        const audioBase64 = await generateSpeech(input.text, input.voice || "eve");
         if (!audioBase64) {
           return { audio: null, error: "TTS non disponibile al momento" };
         }

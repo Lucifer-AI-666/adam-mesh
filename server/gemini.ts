@@ -1,8 +1,10 @@
 /**
  * Gemini API integration for ADAM chat.
  * Uses Google's Generative Language API (v1beta) with gemini-2.0-flash model.
+ * La voce non usa più Gemini: vedi generateSpeech (xAI TTS).
  */
 import { ENV } from "./_core/env";
+import { speechPieces } from "../shared/speechText";
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -166,59 +168,57 @@ TIPI POSSIBILI:
 }
 
 /**
- * Generate speech audio using Gemini TTS API.
- * Uses gemini-3.1-flash-tts-preview model for natural Italian voice.
- * Returns base64-encoded PCM audio (24kHz, 16-bit, mono).
+ * Voce con xAI TTS.
+ * PCM 16 bit, mono, 24000 Hz, lo stesso formato che il browser già suona.
+ * Il testo lungo viene spezzato: ogni pezzo è una richiesta corta.
  */
-export async function generateSpeech(text: string, voiceName: string = "Orus"): Promise<string | null> {
-  const apiKey = ENV.geminiApiKey;
+async function speakPiece(text: string, voiceId: string, apiKey: string): Promise<Buffer | null> {
+  const response = await fetch("https://api.x.ai/v1/tts", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      text,
+      voice_id: voiceId,
+      language: "it",
+      output_format: { codec: "pcm", sample_rate: 24000 },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.warn("[xAI TTS] API error:", response.status, errorText.slice(0, 200));
+    return null;
+  }
+
+  const audio = Buffer.from(await response.arrayBuffer());
+  if (audio.length < 2) return null;
+  return audio.length % 2 === 0 ? audio : audio.subarray(0, audio.length - 1);
+}
+
+export async function generateSpeech(text: string, voiceName: string = "eve"): Promise<string | null> {
+  const apiKey = ENV.xaiApiKey;
   if (!apiKey) {
-    console.warn("[Gemini TTS] No API key configured");
+    console.warn("[xAI TTS] Manca XAI_API_KEY");
     return null;
   }
 
-  try {
-    // Prepare the text with Italian style instruction
-    const ttsPrompt = `Leggi in italiano con voce naturale, calma e professionale: "${text}"`;
+  const voiceId = /^[a-z0-9]{2,32}$/.test(voiceName) ? voiceName : "eve";
+  const pieces = speechPieces(text);
+  if (pieces.length === 0) return null;
 
-    const response = await fetch(
-      `${GEMINI_BASE_URL}/models/gemini-3.1-flash-tts-preview:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: ttsPrompt }] }],
-          generationConfig: {
-            responseModalities: ["AUDIO"],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName: voiceName,
-                },
-              },
-            },
-          },
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.warn("[Gemini TTS] API error:", response.status, errorText.slice(0, 200));
-      return null;
+  const chunks: Buffer[] = [];
+  for (const piece of pieces) {
+    try {
+      const audio = await speakPiece(piece, voiceId, apiKey);
+      if (audio) chunks.push(audio);
+    } catch (error) {
+      console.warn("[xAI TTS] Pezzo fallito:", error);
     }
-
-    const data = await response.json();
-    const audioData = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-
-    if (!audioData) {
-      console.warn("[Gemini TTS] No audio data in response");
-      return null;
-    }
-
-    return audioData; // base64-encoded PCM
-  } catch (error) {
-    console.warn("[Gemini TTS] Failed to generate speech:", error);
-    return null;
   }
+
+  if (chunks.length === 0) return null;
+  return Buffer.concat(chunks).toString("base64");
 }
