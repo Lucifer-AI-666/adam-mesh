@@ -24,6 +24,15 @@ You are the implementation agent for `Lucifer-AI-666/adam-mesh`. Inspect the **c
 - Preserve the user's preferred voice by default; any provider or voice change requires explicit user approval. Preserve safety/system role instructions and do not overwrite admin custom prompts in the database.
 - **Acceptance requires an audible, intelligible Moroccan Darija response**, verified with real playback. Mock tests alone may establish software correctness but cannot mark this requirement PASS. If live testing is unavailable, report BLOCKED / REQUIRES HUMAN AUDIO CHECK.
 
+## Mandatory spoken-audio playback controls — Play / Pause / Resume / Stop
+Implement or repair clear user-facing controls for ADAM's spoken response (including Moroccan Darija):
+- **Play:** start reading the complete assistant response from the beginning when idle/stopped; no duplicate playback or overlapping queues.
+- **Pause:** immediately suspend current audio playback without discarding progress; **Resume:** continue from the paused position, preserving order. If the current TTS/audio mechanism cannot reliably pause, explain and implement a compatible playback approach rather than pretending Stop equals Pause.
+- **Stop:** immediately stop sound, clear queued segments, invalidate all in-flight generation/playback responses and reset UI state. After Stop, late network responses must never restart audio.
+- Buttons must show correct disabled/enabled and loading/playing/paused/stopped/error states; work for Italian and Moroccan Darija, keyboard accessibility and mobile touch; no unintended autoplay after user disables voice.
+- Repeated Play/Stop, rapid switching messages, component unmount and TTS errors must not leak AudioContexts, sources, timers, or playback. If prefetch is used, bound concurrency and cancel/ignore stale requests.
+- Tests (mock): Play→Pause→Resume→Stop; Stop during generation; rapid Play/Stop; late response; replay after Stop; long response >5000 characters with exact ordering; language switch. Manual browser/device check is needed to verify real audio controls and speech quality. Report any unsupported platform behavior explicitly.
+
 ## Acceptance criteria
 1. **Language behavior:** Given typed Arabic script or Moroccan Darija, ADAM answers in Darija/Arabic consistent with the message, unless user asks for a different language. Given Italian, reply Italian. Never assert “Darija recognition” or “auto language detection” without testing.
 2. **STT:** Provide explicit recognition-language selection (at least `it-IT` and `ar-MA`) with persistence only if appropriate to existing app patterns. Surface unsupported browsers and recognition inaccuracies transparently; do not silently force `it-IT` when `ar-MA` selected.
