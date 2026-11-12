@@ -5,6 +5,7 @@ import { trpc } from "@/lib/trpc";
 import CosmicNebula, { type NebulaState } from "@/components/CosmicNebula";
 import { useState, useEffect, useRef } from "react";
 import { Link } from "wouter";
+import { speechPieces } from "../../../shared/speechText";
 import {
   MessageSquare, Map, Shield, BarChart3, Clock, Zap,
   Send, Mic, MicOff, Volume2, ArrowRight, Activity,
@@ -20,7 +21,6 @@ export default function Home() {
   const [conversationId, setConversationId] = useState<number | undefined>();
   const recognitionRef = useRef<any>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [audioCache, setAudioCache] = useState<Record<string, string>>({});
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [audioSpeed, setAudioSpeed] = useState(1);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -42,32 +42,15 @@ export default function Home() {
     refetchInterval: 30000,
   });
 
-  // Gemini TTS mutation
-  const speakMutation = trpc.chat.speak.useMutation({
-    onSuccess: (data) => {
-      if (data.audio) {
-        const cacheKey = lastResponse.slice(0, 50);
-        setAudioCache((prev) => ({ ...prev, [cacheKey]: data.audio }));
-        setIsGeneratingAudio(false);
-        setIsPlayingAudio(true);
-        playGeminiAudio(data.audio);
-        setTimeout(() => setIsPlayingAudio(false), 3000);
-      } else {
-        console.warn("[Gemini TTS] Audio non disponibile");
-        setIsGeneratingAudio(false);
-      }
-    },
-    onError: (err) => {
-      console.warn("[Gemini TTS] Errore:", err.message);
-      setIsGeneratingAudio(false);
-    },
-  });
+  const speakMutation = trpc.chat.speak.useMutation();
 
-  // Audio playback refs
   const audioContextRef = useRef<AudioContext | null>(null);
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const speechQueueRef = useRef<string[]>([]);
+  const speechTokenRef = useRef(0);
+  const playNextPieceRef = useRef<(token: number) => void>(() => {});
 
-  const playGeminiAudio = (base64Audio: string) => {
+  const playPcm = (base64Audio: string, onEnded: () => void) => {
     try {
       if (!audioContextRef.current || audioContextRef.current.state === "closed") {
         audioContextRef.current = new AudioContext({ sampleRate: 24000 });
@@ -76,24 +59,75 @@ export default function Home() {
       if (ctx.state === "suspended") ctx.resume();
 
       const binaryString = atob(base64Audio);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+      const byteLength = binaryString.length - (binaryString.length % 2);
+      const bytes = new Uint8Array(byteLength);
+      for (let i = 0; i < byteLength; i++) bytes[i] = binaryString.charCodeAt(i);
       const int16Array = new Int16Array(bytes.buffer);
       const float32Array = new Float32Array(int16Array.length);
       for (let i = 0; i < int16Array.length; i++) float32Array[i] = int16Array[i] / 32768;
 
-      if (currentSourceRef.current) currentSourceRef.current.stop();
       const buffer = ctx.createBuffer(1, float32Array.length, 24000);
       buffer.getChannelData(0).set(float32Array);
       const source = ctx.createBufferSource();
       source.buffer = buffer;
       source.playbackRate.value = audioSpeed;
       source.connect(ctx.destination);
+      source.onended = () => {
+        if (currentSourceRef.current === source) currentSourceRef.current = null;
+        onEnded();
+      };
       source.start(0);
       currentSourceRef.current = source;
     } catch (err) {
       console.error("[Audio] Errore playback:", err);
+      onEnded();
     }
+  };
+
+  const playNextPiece = (token: number) => {
+    if (token !== speechTokenRef.current) return;
+    const next = speechQueueRef.current.shift();
+    if (!next) {
+      setIsGeneratingAudio(false);
+      setIsPlayingAudio(false);
+      return;
+    }
+    setIsGeneratingAudio(true);
+    speakMutation.mutate(
+      { text: next },
+      {
+        onSuccess: (data) => {
+          if (token !== speechTokenRef.current) return;
+          if (!data.audio) {
+            console.warn("[Voce] Audio non disponibile");
+            playNextPieceRef.current(token);
+            return;
+          }
+          setIsGeneratingAudio(false);
+          setIsPlayingAudio(true);
+          playPcm(data.audio, () => playNextPieceRef.current(token));
+        },
+        onError: (err) => {
+          console.warn("[Voce] Errore:", err.message);
+          if (token !== speechTokenRef.current) return;
+          playNextPieceRef.current(token);
+        },
+      }
+    );
+  };
+
+  playNextPieceRef.current = playNextPiece;
+
+  const speakReply = (text: string) => {
+    const pieces = speechPieces(text);
+    if (!pieces.length) return;
+    speechTokenRef.current += 1;
+    if (currentSourceRef.current) {
+      try { currentSourceRef.current.stop(); } catch {}
+      currentSourceRef.current = null;
+    }
+    speechQueueRef.current = pieces;
+    playNextPiece(speechTokenRef.current);
   };
 
   // Chat send mutation
@@ -120,15 +154,7 @@ export default function Home() {
         setTimeout(() => setNebulaState("idle"), 10000);
       }
       setTimeout(() => {
-        const cacheKey = data.message.slice(0, 100);
-        if (audioCache[cacheKey]) {
-          setIsPlayingAudio(true);
-          playGeminiAudio(audioCache[cacheKey]);
-          setTimeout(() => setIsPlayingAudio(false), 3000);
-        } else {
-          setIsGeneratingAudio(true);
-          speakMutation.mutate({ text: data.message });
-        }
+        speakReply(data.message);
       }, 500);
     },
     onError: (err) => {
@@ -189,7 +215,7 @@ export default function Home() {
       lastResponse, setLastResponse, isListening, startListening, stopListening,
       handleSend, handleKeyDown, handleInstantLogin, timeStr, dateStr,
       sendMutation, speakMutation, isGeneratingAudio, isPlayingAudio,
-      audioSpeed, setAudioSpeed, audioCache, playGeminiAudio,
+      audioSpeed, setAudioSpeed, speakReply,
       mobileMenuOpen, setMobileMenuOpen, showResponseModal, setShowResponseModal
     }} />;
   }
@@ -301,17 +327,7 @@ export default function Home() {
                 </div>
                 <div className="border-t border-white/5 p-4 flex items-center justify-center gap-3 flex-wrap">
                   <button
-                    onClick={() => {
-                      const cacheKey = lastResponse.slice(0, 50);
-                      if (audioCache[cacheKey]) {
-                        setIsPlayingAudio(true);
-                        playGeminiAudio(audioCache[cacheKey]);
-                        setTimeout(() => setIsPlayingAudio(false), 3000);
-                      } else {
-                        setIsGeneratingAudio(true);
-                        speakMutation.mutate({ text: lastResponse });
-                      }
-                    }}
+                    onClick={() => speakReply(lastResponse)}
                     disabled={isGeneratingAudio || speakMutation.isPending}
                     className="flex items-center gap-1 px-2 py-1 text-[10px] font-mono text-white/50 border border-white/10 rounded-full hover:border-primary/50 hover:text-primary transition-all disabled:opacity-30"
                   >
@@ -486,7 +502,7 @@ export default function Home() {
 }
 
 // Mobile version
-function HomeMobile({ user, isAuthenticated, stats, nebulaState, inputText, setInputText, lastResponse, setLastResponse, isListening, startListening, stopListening, handleSend, handleKeyDown, handleInstantLogin, timeStr, dateStr, sendMutation, speakMutation, isGeneratingAudio, setIsGeneratingAudio, isPlayingAudio, setIsPlayingAudio, audioSpeed, setAudioSpeed, audioCache, playGeminiAudio, mobileMenuOpen, setMobileMenuOpen, showResponseModal, setShowResponseModal }: any) {
+function HomeMobile({ user, isAuthenticated, stats, nebulaState, inputText, setInputText, lastResponse, setLastResponse, isListening, startListening, stopListening, handleSend, handleKeyDown, handleInstantLogin, timeStr, dateStr, sendMutation, speakMutation, isGeneratingAudio, isPlayingAudio, audioSpeed, setAudioSpeed, speakReply, mobileMenuOpen, setMobileMenuOpen, showResponseModal, setShowResponseModal }: any) {
   return (
     <div className="min-h-screen bg-[#030310] text-white flex flex-col overflow-hidden">
       {/* Top bar */}
@@ -536,17 +552,7 @@ function HomeMobile({ user, isAuthenticated, stats, nebulaState, inputText, setI
               </div>
               <div className="border-t border-white/5 p-3 flex gap-2 flex-wrap">
                 <button
-                  onClick={() => {
-                    const cacheKey = lastResponse.slice(0, 50);
-                    if (audioCache[cacheKey]) {
-                      setIsPlayingAudio(true);
-                      playGeminiAudio(audioCache[cacheKey]);
-                      setTimeout(() => setIsPlayingAudio(false), 3000);
-                    } else {
-                      setIsGeneratingAudio(true);
-                      speakMutation.mutate({ text: lastResponse });
-                    }
-                  }}
+                  onClick={() => speakReply(lastResponse)}
                   disabled={isGeneratingAudio || speakMutation.isPending}
                   className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 text-[9px] font-mono text-white/50 border border-white/10 rounded-full hover:border-primary/50 hover:text-primary transition-all disabled:opacity-30"
                 >

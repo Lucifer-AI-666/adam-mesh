@@ -8,6 +8,7 @@ import { useParams } from "wouter";
 import { Mic, MicOff, Volume2, VolumeX, Send, Loader2, Bot, User } from "lucide-react";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
+import { speechPieces } from "../../../shared/speechText";
 
 function RiskBadge({ level }: { level?: string | null }) {
   if (!level) return null;
@@ -43,21 +44,12 @@ export default function Chat() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const speechQueueRef = useRef<string[]>([]);
+  const speechTokenRef = useRef(0);
+  const heardAudioRef = useRef(false);
+  const speakNextRef = useRef<(token: number) => void>(() => {});
 
-  const speakMutation = trpc.chat.speak.useMutation({
-    onSuccess: (data) => {
-      if (data.audio) {
-        playGeminiAudio(data.audio);
-      } else {
-        setIsSpeaking(false);
-        toast.info("Voce Gemini non disponibile al momento", { duration: 3000 });
-      }
-    },
-    onError: () => {
-      setIsSpeaking(false);
-      toast.error("Errore nella generazione vocale", { duration: 3000 });
-    },
-  });
+  const speakMutation = trpc.chat.speak.useMutation();
 
   const sendMutation = trpc.chat.send.useMutation({
     onSuccess: (data) => {
@@ -67,7 +59,6 @@ export default function Chat() {
         ...prev,
         { role: "assistant", content: data.message, riskLevel: data.riskLevel },
       ]);
-      // Auto-speak response with Gemini TTS
       if (ttsEnabled && data.message) {
         speakText(data.message);
       }
@@ -104,83 +95,90 @@ export default function Chat() {
     };
   }, []);
 
-  // ============ GEMINI TTS PLAYBACK ============
-  const playGeminiAudio = useCallback(async (base64Audio: string) => {
+  const playPcm = useCallback(async (base64Audio: string, onEnded: () => void) => {
     try {
-      setIsSpeaking(true);
-
-      // Initialize AudioContext if needed
       if (!audioContextRef.current || audioContextRef.current.state === "closed") {
         audioContextRef.current = new AudioContext({ sampleRate: 24000 });
       }
       const ctx = audioContextRef.current;
+      if (ctx.state === "suspended") await ctx.resume();
 
-      if (ctx.state === "suspended") {
-        await ctx.resume();
-      }
-
-      // Decode base64 to raw PCM bytes (16-bit signed, 24kHz, mono)
       const binaryString = atob(base64Audio);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
+      const byteLength = binaryString.length - (binaryString.length % 2);
+      const bytes = new Uint8Array(byteLength);
+      for (let i = 0; i < byteLength; i++) bytes[i] = binaryString.charCodeAt(i);
 
-      // Convert 16-bit PCM to Float32 for Web Audio API
       const int16Array = new Int16Array(bytes.buffer);
       const float32Array = new Float32Array(int16Array.length);
-      for (let i = 0; i < int16Array.length; i++) {
-        float32Array[i] = int16Array[i] / 32768.0;
-      }
+      for (let i = 0; i < int16Array.length; i++) float32Array[i] = int16Array[i] / 32768.0;
 
-      // Create audio buffer
       const audioBuffer = ctx.createBuffer(1, float32Array.length, 24000);
       audioBuffer.getChannelData(0).set(float32Array);
 
-      // Stop any currently playing audio
-      if (currentSourceRef.current) {
-        try { currentSourceRef.current.stop(); } catch {}
-      }
-
-      // Play the buffer
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(ctx.destination);
       source.onended = () => {
-        setIsSpeaking(false);
-        currentSourceRef.current = null;
+        if (currentSourceRef.current === source) currentSourceRef.current = null;
+        onEnded();
       };
       currentSourceRef.current = source;
       source.start();
     } catch (error) {
-      console.warn("[Gemini TTS] Playback error:", error);
-      setIsSpeaking(false);
+      console.warn("[Voce] Errore playback:", error);
+      onEnded();
     }
   }, []);
 
-  // ============ SPEAK TEXT WITH GEMINI TTS ============
+  const speakNext = useCallback((token: number) => {
+    if (token !== speechTokenRef.current) return;
+    const next = speechQueueRef.current.shift();
+    if (!next) {
+      setIsSpeaking(false);
+      if (!heardAudioRef.current) {
+        toast.info("Voce non disponibile al momento", { duration: 3000 });
+      }
+      return;
+    }
+    speakMutation.mutate(
+      { text: next },
+      {
+        onSuccess: (data) => {
+          if (token !== speechTokenRef.current) return;
+          if (!data.audio) {
+            speakNextRef.current(token);
+            return;
+          }
+          heardAudioRef.current = true;
+          playPcm(data.audio, () => speakNextRef.current(token));
+        },
+        onError: () => {
+          if (token !== speechTokenRef.current) return;
+          speakNextRef.current(token);
+        },
+      }
+    );
+  }, [playPcm, speakMutation]);
+
+  speakNextRef.current = speakNext;
+
   const speakText = useCallback((text: string) => {
-    // Strip markdown for cleaner speech
-    const cleanText = text
-      .replace(/\*\*(.*?)\*\*/g, "$1")
-      .replace(/\*(.*?)\*/g, "$1")
-      .replace(/#{1,6}\s/g, "")
-      .replace(/---/g, "")
-      .replace(/⚠️/g, "attenzione")
-      .replace(/🔴/g, "")
-      .replace(/\[.*?\]\(.*?\)/g, "")
-      .replace(/`(.*?)`/g, "$1")
-      .trim();
-
-    if (!cleanText) return;
-
-    // Truncate to 2000 chars for API limit
-    const truncated = cleanText.slice(0, 2000);
+    const pieces = speechPieces(text);
+    if (!pieces.length) return;
+    if (currentSourceRef.current) {
+      try { currentSourceRef.current.stop(); } catch {}
+      currentSourceRef.current = null;
+    }
+    speechTokenRef.current += 1;
+    heardAudioRef.current = false;
+    speechQueueRef.current = pieces;
     setIsSpeaking(true);
-    speakMutation.mutate({ text: truncated });
-  }, []);
+    speakNext(speechTokenRef.current);
+  }, [speakNext]);
 
   const stopSpeaking = useCallback(() => {
+    speechTokenRef.current += 1;
+    speechQueueRef.current = [];
     if (currentSourceRef.current) {
       try { currentSourceRef.current.stop(); } catch {}
       currentSourceRef.current = null;
@@ -258,7 +256,7 @@ export default function Chat() {
             <h1 className="text-2xl font-bold text-foreground">
               <span className="text-primary">ADAM</span> Chat
             </h1>
-            <p className="text-sm text-muted-foreground">Assistente civico di Acqui Terme — Powered by Gemini</p>
+            <p className="text-sm text-muted-foreground">Assistente civico di Acqui Terme</p>
           </div>
           <div className="flex items-center gap-3">
             {currentRisk && (
@@ -278,7 +276,7 @@ export default function Chat() {
                 "transition-colors",
                 ttsEnabled ? "text-primary" : "text-muted-foreground"
               )}
-              title={ttsEnabled ? "Disattiva voce Gemini" : "Attiva voce Gemini"}
+              title={ttsEnabled ? "Disattiva voce" : "Attiva voce"}
             >
               {ttsEnabled ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
             </Button>
@@ -298,7 +296,7 @@ export default function Chat() {
                   L'assistente civico di Acqui Terme. Chiedimi qualsiasi cosa!
                 </p>
                 <p className="text-xs text-primary/70 mt-2 flex items-center justify-center gap-1">
-                  <Volume2 className="h-3 w-3" /> Voce naturale Gemini attiva
+                  <Volume2 className="h-3 w-3" /> Voce attiva
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-md">
@@ -358,7 +356,7 @@ export default function Chat() {
                       <button
                         onClick={() => speakText(msg.content)}
                         className="text-muted-foreground hover:text-primary transition-colors"
-                        title="Riascolta con voce Gemini"
+                        title="Riascolta"
                       >
                         <Volume2 className="h-3.5 w-3.5" />
                       </button>
@@ -445,7 +443,7 @@ export default function Chat() {
             {isSpeaking && (
               <span className="flex items-center gap-1">
                 <Volume2 className="h-3 w-3 text-primary animate-pulse" />
-                ADAM sta parlando (Gemini Voice)...
+                ADAM sta parlando...
                 <button onClick={stopSpeaking} className="underline hover:text-primary">
                   Ferma
                 </button>
