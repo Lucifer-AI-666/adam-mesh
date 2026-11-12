@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import CosmicNebula, { type NebulaState } from "@/components/CosmicNebula";
+import { NotificationCenterControl } from "@/components/NotificationCenter";
 import { useState, useEffect, useRef } from "react";
 import { Link } from "wouter";
 import {
@@ -34,6 +35,10 @@ export default function Home() {
     checkMobile();
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
+  }, []);
+
+  useEffect(() => {
+    document.title = "ADAM Acqui Terme | Assistente Civico Intelligente";
   }, []);
 
   // Stats query
@@ -103,6 +108,23 @@ export default function Home() {
       setLastResponse(data.message);
       setShowResponseModal(true);
       setNebulaState("idle");
+
+      // Trigger notifications based on risk level
+      const notificationMap: Record<string, { type: string; title: string; message: string }> = {
+        "red": { type: "escalation", title: "🔴 Escalation Richiesta", message: "La tua richiesta è stata inoltrata a un operatore umano." },
+        "yellow": { type: "warning", title: "⚠️ Verifica Necessaria", message: "Questa informazione potrebbe richiedere verifica. Contatta l'ufficio per conferma." },
+        "green": { type: "success", title: "✓ Risposta Disponibile", message: "Ho trovato le informazioni che cercavi." },
+      };
+      if (data.riskLevel && notificationMap[data.riskLevel]) {
+        const notif = notificationMap[data.riskLevel];
+        (window as any).adamNotifications?.add({
+          type: notif.type,
+          title: notif.title,
+          message: notif.message,
+          sound: data.riskLevel === "red",
+        });
+      }
+      // Notify response type for nebula color
       if (data.responseType) {
         const colorMap: Record<string, NebulaState> = {
           "in-ascolto": "idle",
@@ -203,9 +225,10 @@ export default function Home() {
       }} />
 
       {/* Top bar */}
-      <header className="relative z-10 flex items-center justify-between px-6 py-4 border-b border-white/5">
+      <header className="relative z-30 flex items-center justify-between px-6 py-4 border-b border-white/5">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold tracking-[0.15em] text-primary font-mono">A.D.A.M.</h1>
+          <NotificationCenterControl />
           <span className="text-[10px] text-white/30 font-mono uppercase tracking-wider">
             Acqui Digital Administrative Mesh
           </span>
@@ -261,6 +284,7 @@ export default function Home() {
 
         {/* Center - Nebula */}
         <main className="flex-1 flex flex-col items-center justify-center relative">
+          <h2 className="sr-only">Assistente civico intelligente per Acqui Terme</h2>
           <CosmicNebula state={nebulaState} size={420} />
 
           {/* Response preview - click to expand */}
@@ -493,6 +517,7 @@ function HomeMobile({ user, isAuthenticated, stats, nebulaState, inputText, setI
       <header className="border-b border-white/5 p-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-bold text-primary font-mono">A.D.A.M.</h1>
+          <NotificationCenterControl />
         </div>
         <div className="text-right font-mono text-[10px]">
           <div className="text-white/90">{timeStr}</div>
@@ -501,6 +526,7 @@ function HomeMobile({ user, isAuthenticated, stats, nebulaState, inputText, setI
 
       {/* Main content */}
       <main className="flex-1 flex flex-col items-center justify-center relative px-4 pb-24">
+        <h2 className="sr-only">Assistente civico intelligente per Acqui Terme</h2>
         <CosmicNebula state={nebulaState} size={240} />
 
         {/* Response preview */}

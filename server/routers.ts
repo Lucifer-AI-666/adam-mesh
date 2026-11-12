@@ -248,7 +248,7 @@ export const appRouter = router({
     /** Generate speech audio from text using Gemini TTS */
     speak: publicProcedure
       .input(z.object({
-        text: z.string().min(1).max(2000),
+        text: z.string().min(1).max(5000),
         voice: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
@@ -358,6 +358,22 @@ export const appRouter = router({
           }
         }
         return { success: true };
+      }),
+  }),
+
+  // ============ NOTIFICATIONS ============
+  notifications: router({
+    send: adminProcedure
+      .input(z.object({
+        type: z.enum(["info", "warning", "error", "success", "escalation"]),
+        title: z.string(),
+        message: z.string(),
+        actionUrl: z.string().optional(),
+        sound: z.boolean().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        console.log("[Notification]", input);
+        return { success: true, id: Math.random().toString(36).substr(2, 9) };
       }),
   }),
 
