@@ -16,6 +16,14 @@ You are the implementation agent for `Lucifer-AI-666/adam-mesh`. Inspect the **c
 - `server/routers.ts`: `chat.speak` is `publicProcedure`; evaluate abuse/cost defenses without breaking legitimate usage.
 - Issue #20 is historically stale regarding Gemini TTS and truncation. Cite it as prior context, not proof of current behavior.
 
+## Non-negotiable Moroccan Darija spoken output (user clarification)
+**Speaking Moroccan Darija aloud is mandatory, not just understanding or writing it.** End-to-end target: user speaks or types Moroccan Darija (Arabic script or Latin transliteration) -> ADAM understands the request -> generates a natural Moroccan Darija reply -> **TTS audibly speaks that same Darija reply**. Keep the existing preferred voice identity when technically possible. The user already observed correct pronunciation of a short Arabic phrase, but that does not prove full-sentence Darija support.
+
+- Add an explicit end-to-end test matrix for Arabic-script Darija, Latin-script Darija, mixed Italian/Darija and Italian-only; test language selection, response text, TTS request language and audio playback. Include a realistic multi-sentence Darija example and note whether a real human listened.
+- Verify the xAI TTS API's supported language codes and behavior; current `language: "it"` is likely a mismatch for Moroccan Arabic. Do not assume `ar-MA` is accepted by the provider. If unsupported, implement a safe, user-visible choice or documented fallback with verified capability, never silently claim full Darija speech.
+- Preserve the user's preferred voice by default; any provider or voice change requires explicit user approval. Preserve safety/system role instructions and do not overwrite admin custom prompts in the database.
+- **Acceptance requires an audible, intelligible Moroccan Darija response**, verified with real playback. Mock tests alone may establish software correctness but cannot mark this requirement PASS. If live testing is unavailable, report BLOCKED / REQUIRES HUMAN AUDIO CHECK.
+
 ## Acceptance criteria
 1. **Language behavior:** Given typed Arabic script or Moroccan Darija, ADAM answers in Darija/Arabic consistent with the message, unless user asks for a different language. Given Italian, reply Italian. Never assert “Darija recognition” or “auto language detection” without testing.
 2. **STT:** Provide explicit recognition-language selection (at least `it-IT` and `ar-MA`) with persistence only if appropriate to existing app patterns. Surface unsupported browsers and recognition inaccuracies transparently; do not silently force `it-IT` when `ar-MA` selected.
