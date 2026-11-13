@@ -13,6 +13,7 @@ import Escalations from "./pages/Escalations";
 import AdminNodes from "./pages/AdminNodes";
 import AdminKnowledge from "./pages/AdminKnowledge";
 import AdminSettings from "./pages/AdminSettings";
+import Login from "./pages/Login";
 
 function Router() {
   return (
@@ -27,6 +28,7 @@ function Router() {
       <Route path={"/admin/nodes"} component={AdminNodes} />
       <Route path={"/admin/knowledge"} component={AdminKnowledge} />
       <Route path={"/admin/settings"} component={AdminSettings} />
+      <Route path={"/login"} component={Login} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
     </Switch>
