@@ -14,7 +14,8 @@ export function stripForSpeech(text: string): string {
 }
 
 export function speechPieces(text: string, maxLen = 380): string[] {
-  const clean = stripForSpeech(text).slice(0, 8000);
+  if (!Number.isInteger(maxLen) || maxLen < 2) throw new Error("Invalid speech segment length");
+  const clean = stripForSpeech(text);
   if (!clean) return [];
 
   const sentences = clean.split(/(?<=[.!?;:])\s+/);

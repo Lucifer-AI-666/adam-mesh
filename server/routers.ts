@@ -1,3 +1,5 @@
+import { ttsBudget } from "./ttsBudget";
+import { languageInstruction, LANGUAGE_POLICY } from "../shared/voiceLanguage";
 import { COOKIE_NAME } from "@shared/const";
 import { TRPCError } from "@trpc/server";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -46,7 +48,7 @@ REGOLE FONDAMENTALI:
 1. Usa le informazioni dalla knowledge base fornita come fonte primaria
 2. Se non hai informazioni sufficienti, dillo e suggerisci l'ufficio competente o il numero 0144 770111
 3. Non inventare MAI orari, numeri di telefono o procedure specifiche
-4. Rispondi in italiano. Se l'utente scrive in dialetto, rispondi mescolando italiano e dialetto
+4. ${LANGUAGE_POLICY}
 5. Per questioni legali, amministrative complesse o emergenze, suggerisci il contatto diretto
 6. Sii conciso ma completo, usa un tono caldo e accogliente
 
@@ -88,6 +90,7 @@ export const appRouter = router({
       .input(z.object({
         conversationId: z.number().optional(),
         message: z.string().min(1).max(5000),
+        language: z.enum(["auto", "it", "darija"]).default("auto"),
       }))
       .mutation(async ({ ctx, input }) => {
         let conversationId = input.conversationId;
@@ -140,7 +143,7 @@ export const appRouter = router({
           : "";
 
         // Load custom prompt from DB
-        const systemPrompt = await getSystemPrompt();
+        const systemPrompt = (await getSystemPrompt()) + "\n\n" + languageInstruction(input.language);
 
         // Build messages for LLM
         const llmMessages = [
@@ -250,9 +253,14 @@ export const appRouter = router({
       .input(z.object({
         text: z.string().min(1).max(8000),
         voice: z.string().optional(),
+        language: z.enum(["auto", "it", "darija"]).default("auto"),
       }))
       .mutation(async ({ input }) => {
-        const audioBase64 = await generateSpeech(input.text, input.voice || "eve");
+        const release = ttsBudget.acquire(input.text.length);
+        if (!release) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Voce occupata: riprova tra poco." });
+        let audioBase64: string | null;
+        try { audioBase64 = await generateSpeech(input.text, input.voice || "eve", input.language); }
+        finally { release(); }
         if (!audioBase64) {
           return { audio: null, error: "TTS non disponibile al momento" };
         }

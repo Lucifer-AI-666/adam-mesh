@@ -1,3 +1,4 @@
+import { ttsLanguage, type VoiceLanguage } from "../shared/voiceLanguage";
 /**
  * Gemini API integration for ADAM chat.
  * Uses Google's Generative Language API (v1beta) with gemini-2.0-flash model.
@@ -172,24 +173,24 @@ TIPI POSSIBILI:
  * PCM 16 bit, mono, 24000 Hz, lo stesso formato che il browser già suona.
  * Il testo lungo viene spezzato: ogni pezzo è una richiesta corta.
  */
-async function speakPiece(text: string, voiceId: string, apiKey: string): Promise<Buffer | null> {
+async function speakPiece(text: string, voiceId: string, apiKey: string, language: "it" | "auto"): Promise<Buffer | null> {
   const response = await fetch("https://api.x.ai/v1/tts", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
+    signal: AbortSignal.timeout(30000),
     body: JSON.stringify({
       text,
       voice_id: voiceId,
-      language: "it",
+      language,
       output_format: { codec: "pcm", sample_rate: 24000 },
     }),
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    console.warn("[xAI TTS] API error:", response.status, errorText.slice(0, 200));
+    console.warn("[xAI TTS] API status:", response.status);
     return null;
   }
 
@@ -198,7 +199,7 @@ async function speakPiece(text: string, voiceId: string, apiKey: string): Promis
   return audio.length % 2 === 0 ? audio : audio.subarray(0, audio.length - 1);
 }
 
-export async function generateSpeech(text: string, voiceName: string = "eve"): Promise<string | null> {
+export async function generateSpeech(text: string, voiceName: string = "eve", language: VoiceLanguage = "auto"): Promise<string | null> {
   const apiKey = ENV.xaiApiKey;
   if (!apiKey) {
     console.warn("[xAI TTS] Manca XAI_API_KEY");
@@ -212,10 +213,12 @@ export async function generateSpeech(text: string, voiceName: string = "eve"): P
   const chunks: Buffer[] = [];
   for (const piece of pieces) {
     try {
-      const audio = await speakPiece(piece, voiceId, apiKey);
-      if (audio) chunks.push(audio);
+      const audio = await speakPiece(piece, voiceId, apiKey, ttsLanguage(language, text));
+      if (!audio) return null;
+      chunks.push(audio);
     } catch (error) {
-      console.warn("[xAI TTS] Pezzo fallito:", error);
+      console.warn("[xAI TTS] Generazione non riuscita");
+      return null;
     }
   }
 
