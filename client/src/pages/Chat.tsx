@@ -8,7 +8,8 @@ import { useParams } from "wouter";
 import { Mic, MicOff, Volume2, VolumeX, Send, Loader2, Bot, User } from "lucide-react";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
-import { speechPieces } from "../../../shared/speechText";
+import { SpeechPlayer, type PlaybackState } from "@/lib/speechPlayer";
+import type { VoiceLanguage } from "../../../shared/voiceLanguage";
 
 function RiskBadge({ level }: { level?: string | null }) {
   if (!level) return null;
@@ -42,24 +43,37 @@ export default function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const speechQueueRef = useRef<string[]>([]);
-  const speechTokenRef = useRef(0);
-  const heardAudioRef = useRef(false);
-  const speakNextRef = useRef<(token: number) => void>(() => {});
-
+  const [language, setLanguage] = useState<VoiceLanguage>("auto");
+  const [recognitionLanguage, setRecognitionLanguage] = useState("it-IT");
+  const [playbackState, setPlaybackState] = useState<PlaybackState>("idle");
+  const enabledRef = useRef(ttsEnabled);
+  const voiceEpoch = useRef(0);
+  const mountedRef = useRef(true);
   const speakMutation = trpc.chat.speak.useMutation();
+  const mutationRef = useRef(speakMutation);
+  mutationRef.current = speakMutation;
+  const playerRef = useRef<SpeechPlayer | null>(null);
+  const getPlayer = () => {
+    if (!playerRef.current) playerRef.current = new SpeechPlayer(
+      async (text, language) => (await mutationRef.current.mutateAsync({ text, language })).audio,
+      (state) => { setPlaybackState(state); setIsSpeaking(["loading", "playing", "paused"].includes(state)); }
+    );
+    return playerRef.current;
+  };
+  const speakText = (text: string) => { if (mountedRef.current && enabledRef.current) getPlayer().play(text, language); };
+  const stopSpeaking = () => { voiceEpoch.current++; playerRef.current?.stop(); };
 
   const sendMutation = trpc.chat.send.useMutation({
-    onSuccess: (data) => {
+    onMutate: () => ({ voiceEpoch: voiceEpoch.current }),
+    onSuccess: (data, _variables, context) => {
+      if (!mountedRef.current) return;
       setConversationId(data.conversationId);
       setCurrentRisk(data.riskLevel);
       setMessages(prev => [
         ...prev,
         { role: "assistant", content: data.message, riskLevel: data.riskLevel },
       ]);
-      if (ttsEnabled && data.message) {
+      if (enabledRef.current && context?.voiceEpoch === voiceEpoch.current && data.message) {
         speakText(data.message);
       }
     },
@@ -86,104 +100,13 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Cleanup audio context on unmount
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
+      mountedRef.current = false;
+      playerRef.current?.dispose(); playerRef.current = null;
+      recognitionRef.current?.abort();
     };
-  }, []);
-
-  const playPcm = useCallback(async (base64Audio: string, onEnded: () => void) => {
-    try {
-      if (!audioContextRef.current || audioContextRef.current.state === "closed") {
-        audioContextRef.current = new AudioContext({ sampleRate: 24000 });
-      }
-      const ctx = audioContextRef.current;
-      if (ctx.state === "suspended") await ctx.resume();
-
-      const binaryString = atob(base64Audio);
-      const byteLength = binaryString.length - (binaryString.length % 2);
-      const bytes = new Uint8Array(byteLength);
-      for (let i = 0; i < byteLength; i++) bytes[i] = binaryString.charCodeAt(i);
-
-      const int16Array = new Int16Array(bytes.buffer);
-      const float32Array = new Float32Array(int16Array.length);
-      for (let i = 0; i < int16Array.length; i++) float32Array[i] = int16Array[i] / 32768.0;
-
-      const audioBuffer = ctx.createBuffer(1, float32Array.length, 24000);
-      audioBuffer.getChannelData(0).set(float32Array);
-
-      const source = ctx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(ctx.destination);
-      source.onended = () => {
-        if (currentSourceRef.current === source) currentSourceRef.current = null;
-        onEnded();
-      };
-      currentSourceRef.current = source;
-      source.start();
-    } catch (error) {
-      console.warn("[Voce] Errore playback:", error);
-      onEnded();
-    }
-  }, []);
-
-  const speakNext = useCallback((token: number) => {
-    if (token !== speechTokenRef.current) return;
-    const next = speechQueueRef.current.shift();
-    if (!next) {
-      setIsSpeaking(false);
-      if (!heardAudioRef.current) {
-        toast.info("Voce non disponibile al momento", { duration: 3000 });
-      }
-      return;
-    }
-    speakMutation.mutate(
-      { text: next },
-      {
-        onSuccess: (data) => {
-          if (token !== speechTokenRef.current) return;
-          if (!data.audio) {
-            speakNextRef.current(token);
-            return;
-          }
-          heardAudioRef.current = true;
-          playPcm(data.audio, () => speakNextRef.current(token));
-        },
-        onError: () => {
-          if (token !== speechTokenRef.current) return;
-          speakNextRef.current(token);
-        },
-      }
-    );
-  }, [playPcm, speakMutation]);
-
-  speakNextRef.current = speakNext;
-
-  const speakText = useCallback((text: string) => {
-    const pieces = speechPieces(text);
-    if (!pieces.length) return;
-    if (currentSourceRef.current) {
-      try { currentSourceRef.current.stop(); } catch {}
-      currentSourceRef.current = null;
-    }
-    speechTokenRef.current += 1;
-    heardAudioRef.current = false;
-    speechQueueRef.current = pieces;
-    setIsSpeaking(true);
-    speakNext(speechTokenRef.current);
-  }, [speakNext]);
-
-  const stopSpeaking = useCallback(() => {
-    speechTokenRef.current += 1;
-    speechQueueRef.current = [];
-    if (currentSourceRef.current) {
-      try { currentSourceRef.current.stop(); } catch {}
-      currentSourceRef.current = null;
-    }
-    setIsSpeaking(false);
   }, []);
 
   // ============ SPEECH-TO-TEXT (Web Speech API for input) ============
@@ -195,7 +118,7 @@ export default function Chat() {
     }
 
     const recognition = new SpeechRecognition();
-    recognition.lang = "it-IT";
+    recognition.lang = recognitionLanguage;
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
@@ -211,7 +134,7 @@ export default function Chat() {
     };
 
     recognition.onerror = (event: any) => {
-      console.warn("[STT] Error:", event.error);
+      toast.error("Riconoscimento vocale non riuscito: verifica lingua e permesso microfono.");
       setIsListening(false);
     };
 
@@ -220,8 +143,8 @@ export default function Chat() {
     };
 
     recognitionRef.current = recognition;
-    recognition.start();
-  }, []);
+    try { recognition.start(); } catch { setIsListening(false); toast.error("Riconoscimento vocale non disponibile."); }
+  }, [recognitionLanguage]);
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
@@ -236,7 +159,7 @@ export default function Chat() {
     if (!text) return;
     setMessages(prev => [...prev, { role: "user", content: text }]);
     setInputText("");
-    sendMutation.mutate({ conversationId, message: text });
+    sendMutation.mutate({ conversationId, message: text, language });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -250,6 +173,22 @@ export default function Chat() {
     <div className="min-h-screen flex flex-col bg-background">
       <Navbar />
       <main className="flex-1 container py-4 flex flex-col" style={{ height: "calc(100vh - 64px)" }}>
+        <div className="flex flex-wrap gap-3 mb-3 text-sm">
+          <label>Lingua risposta <select aria-label="Lingua risposta" value={language} onChange={e => { stopSpeaking(); setLanguage(e.target.value as VoiceLanguage); }} className="bg-background border p-2 rounded">
+            <option value="auto">Italiano / segui il messaggio</option><option value="it">Italiano</option><option value="darija">Darija marocchina</option>
+          </select></label>
+          <label>Lingua microfono <select aria-label="Lingua microfono" value={recognitionLanguage} onChange={e => { recognitionRef.current?.abort(); setIsListening(false); setRecognitionLanguage(e.target.value); }} className="bg-background border p-2 rounded">
+            <option value="it-IT">Italiano</option><option value="ar-MA">Darija · ar-MA</option>
+          </select></label>
+          <p className="text-xs text-muted-foreground">Darija: riconoscimento dipendente dal browser; voce Eve con lingua automatica xAI, pronuncia marocchina da verificare.</p>
+        </div>
+        <div className="flex flex-wrap gap-2 mb-3" aria-label="Riproduzione risposta">
+          <Button disabled={!ttsEnabled || isSpeaking || !messages.some(m => m.role === "assistant")} onClick={() => { const m = [...messages].reverse().find(m => m.role === "assistant"); if (m) speakText(m.content); }}>Play</Button>
+          <Button disabled={!['loading', 'playing'].includes(playbackState)} onClick={() => playerRef.current?.pause()}>Pausa</Button>
+          <Button disabled={playbackState !== 'paused'} onClick={() => void playerRef.current?.resume()}>Riprendi</Button>
+          <Button disabled={!isSpeaking && !sendMutation.isPending} onClick={stopSpeaking}>Stop</Button>
+          <span role="status">{({idle:"Pronto",loading:"Caricamento voce…",playing:"Riproduzione",paused:"In pausa",stopped:"Fermato",error:"Errore voce: riprova Play"})[playbackState]}</span>
+        </div>
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div>
@@ -269,8 +208,9 @@ export default function Chat() {
               variant="ghost"
               size="icon"
               onClick={() => {
+                enabledRef.current = !ttsEnabled;
                 setTtsEnabled(!ttsEnabled);
-                if (isSpeaking) stopSpeaking();
+                stopSpeaking();
               }}
               className={cn(
                 "transition-colors",
@@ -349,7 +289,7 @@ export default function Chat() {
                 ) : (
                   <p>{msg.content}</p>
                 )}
-                {msg.role === "assistant" && msg.riskLevel && (
+                {msg.role === "assistant" && (
                   <div className="mt-2 flex items-center gap-2">
                     <RiskBadge level={msg.riskLevel} />
                     {ttsEnabled && (
@@ -443,7 +383,7 @@ export default function Chat() {
             {isSpeaking && (
               <span className="flex items-center gap-1">
                 <Volume2 className="h-3 w-3 text-primary animate-pulse" />
-                ADAM sta parlando...
+                Voce: {playbackState === "paused" ? "in pausa" : playbackState === "loading" ? "caricamento" : "riproduzione"}
                 <button onClick={stopSpeaking} className="underline hover:text-primary">
                   Ferma
                 </button>
