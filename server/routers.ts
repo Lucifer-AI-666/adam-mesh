@@ -7,6 +7,7 @@ import { invokeLLM } from "./_core/llm";
 import { callGemini, classifyRiskWithGemini, classifyResponseType, generateSpeech } from "./gemini";
 import { notifyOwner } from "./_core/notification";
 import { z } from "zod";
+import { creativeRouter } from "./creative";
 import * as db from "./db";
 import {
   assertConversationAccess,
@@ -73,6 +74,7 @@ async function classifyRisk(userMessage: string, conversationContext: string): P
 
 export const appRouter = router({
   system: systemRouter,
+  creative: creativeRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
