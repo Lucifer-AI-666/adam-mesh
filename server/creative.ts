@@ -116,7 +116,7 @@ export function extractAssets(history: unknown, kind: Kind): Asset[] {
         if (typeof filename !== "string" || !/^[\w .()-]{1,180}$/.test(filename) ||
             filename === "." || filename === "..") continue;
         const folder = typeof subfolder === "string" ? subfolder : "";
-        if (folder && !/^[\w .()-]{1,180}$/.test(folder)) continue;
+        if (folder && !/^[a-zA-Z0-9 _()-]{1,180}$/.test(folder)) continue;
         if (type !== "output") continue;
         const mime = mediaType(filename, kind);
         if (mime) results.push({ filename, subfolder: folder, type: "output", mime });
