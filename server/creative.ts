@@ -256,12 +256,24 @@ export const creativeRouter = router({
         await response.body?.cancel();
         throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "File maggiore di 16 MB: usa l'interfaccia locale ComfyUI per salvarlo" });
       }
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.byteLength > MAX_DOWNLOAD_BYTES) throw new TRPCError({ code: "PAYLOAD_TOO_LARGE" });
+      const reader = response.body?.getReader();
+      if (!reader) throw new TRPCError({ code: "BAD_GATEWAY", message: "Risposta media senza contenuto" });
+      const chunks: Buffer[] = [];
+      let total = 0;
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > MAX_DOWNLOAD_BYTES) {
+          await reader.cancel();
+          throw new TRPCError({ code: "PAYLOAD_TOO_LARGE", message: "File maggiore di 16 MB" });
+        }
+        chunks.push(Buffer.from(value));
+      }
       return {
         filename: file.filename,
         mime: file.mime,
-        base64: Buffer.from(bytes).toString("base64"),
+        base64: Buffer.concat(chunks, total).toString("base64"),
       };
     }),
 });
