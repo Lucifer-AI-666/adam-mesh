@@ -153,7 +153,7 @@ async function comfyFetch(path: string, init?: RequestInit): Promise<Response> {
 
 function pruneJobs() {
   const now = Date.now();
-  for (const [id, job] of jobs) {
+  for (const [id, job] of Array.from(jobs.entries())) {
     if (now - job.created > 2 * HOUR) jobs.delete(id);
   }
 }
@@ -175,14 +175,14 @@ export const creativeRouter = router({
     .mutation(async ({ ctx, input }) => {
       pruneJobs();
       const ownerId = ctx.user.id;
-      const recent = [...jobs.values()].filter(j => j.ownerId === ownerId && Date.now() - j.created < HOUR);
+      const recent = Array.from(jobs.values()).filter(j => j.ownerId === ownerId && Date.now() - j.created < HOUR);
       if (recent.length >= 6) {
         throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Limite di 6 generazioni all'ora raggiunto" });
       }
       if (recent.some(j => j.state === "queued")) {
         throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Una generazione è già in corso" });
       }
-      if ([...jobs.values()].filter(j => j.state === "queued").length >= 2) {
+      if (Array.from(jobs.values()).filter(j => j.state === "queued").length >= 2) {
         throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "Motore occupato, riprova più tardi" });
       }
       const workflow = await workflowFor(input.kind);
