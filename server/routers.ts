@@ -4,7 +4,8 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, adminProcedure, router } from "./_core/trpc";
 import { invokeLLM } from "./_core/llm";
-import { callGemini, classifyRiskWithGemini, classifyResponseType, generateSpeech } from "./gemini";
+import { callGemini, classifyRiskWithGemini, classifyResponseType, generateSpeech, streamAnswerText } from "./gemini";
+import { speechPieces, takeClosedPieces } from "../shared/speechText";
 import { notifyOwner } from "./_core/notification";
 import { z } from "zod";
 import * as db from "./db";
@@ -49,6 +50,7 @@ REGOLE FONDAMENTALI:
 4. Rispondi in italiano. Se l'utente scrive in dialetto, rispondi mescolando italiano e dialetto
 5. Per questioni legali, amministrative complesse o emergenze, suggerisci il contatto diretto
 6. Sii conciso ma completo, usa un tono caldo e accogliente
+7. La prima frase è breve, massimo dodici parole, e finisce con un punto. Il resto viene dopo, così la voce può partire subito
 
 CLASSIFICAZIONE DELLE RICHIESTE:
 - VERDE: informazioni pubbliche generali (orari, contatti, eventi, indicazioni, storia, turismo, gastronomia)
@@ -166,11 +168,14 @@ export const appRouter = router({
 
           await db.updateConversation(conversationId, { status: "escalated", riskLevel: "red" });
 
-          // Notify owner
-          await notifyOwner({
-            title: "🔴 Escalation ADAM - Richiesta Rossa",
-            content: `Nuova escalation da conversazione #${conversationId}.\nMessaggio: ${input.message.slice(0, 300)}`,
-          });
+          try {
+            await notifyOwner({
+              title: "🔴 Escalation ADAM - Richiesta Rossa",
+              content: `Nuova escalation da conversazione #${conversationId}.\nMessaggio: ${input.message.slice(0, 300)}`,
+            });
+          } catch (notifyError) {
+            console.warn("[ADAM] Notifica escalation non inviata:", notifyError);
+          }
         } else {
           // Generate AI response with Gemini (with fallback)
           try {
@@ -220,6 +225,196 @@ export const appRouter = router({
           conversationId,
           message: assistantContent,
           riskLevel,
+          responseType,
+        };
+      }),
+
+    /**
+     * Stessa chat di `send`, ma Gemini arriva a pezzi.
+     * Ogni frase chiusa esce subito, così la voce non aspetta la risposta intera.
+     */
+    live: publicProcedure
+      .input(z.object({
+        conversationId: z.number().optional(),
+        message: z.string().min(1).max(5000),
+      }))
+      .query(async function* ({ ctx, input }) {
+        let conversationId = input.conversationId;
+
+        if (!conversationId) {
+          conversationId = await db.createConversation({
+            userId: ctx.user?.id ?? null,
+            channel: "web",
+            status: "active",
+            title: input.message.slice(0, 100),
+          });
+        } else {
+          const existing = await db.getConversationById(conversationId);
+          if (!existing) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "Conversation not found",
+            });
+          }
+          if (ctx.user) {
+            assertConversationAccess(ctx.user, existing);
+          } else if (!canGuestContinueConversation(existing)) {
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "You do not have access to this conversation",
+            });
+          }
+        }
+
+        await db.addMessage({
+          conversationId,
+          role: "user",
+          content: input.message,
+        });
+
+        const history = await db.getConversationMessages(conversationId);
+        const contextStr = history.map(m => `${m.role}: ${m.content}`).join("\n").slice(-2000);
+        let riskLevel: "green" | "yellow" | "red" | null = null;
+        const riskTask = classifyRisk(input.message, contextStr)
+          .then((level) => {
+            riskLevel = level;
+            return level;
+          })
+          .catch((error) => {
+            console.error("[ADAM] Classificazione rischio fallita:", error);
+            riskLevel = "green";
+            return "green" as const;
+          });
+        const knowledge = await db.searchKnowledge(input.message, 5);
+        const knowledgeContext = knowledge.length > 0
+          ? `\n\nINFORMAZIONI DALLA KNOWLEDGE BASE:\n${knowledge.map(k => `- ${k.title}: ${k.content}`).join("\n")}`
+          : "";
+        const systemPrompt = await getSystemPrompt();
+        const prior = history.slice(-10).filter(m => m.role !== "system").map(m => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        }));
+
+        let assistantContent = "";
+        let pending = "";
+        const redText = `⚠️ **Richiesta classificata come sensibile**\n\nLa tua richiesta riguarda un argomento che richiede l'intervento di un operatore umano competente. Ho attivato l'escalation al reparto responsabile.\n\nUn operatore ti contatterà al più presto. Nel frattempo, se hai urgenza puoi contattare direttamente:\n- **Centralino Comune**: 0144 770111\n- **URP**: urp@comune.acquiterme.al.it`;
+
+        const emitPieces = (buffer: string, flush: boolean) => (
+          flush
+            ? { pieces: speechPieces(buffer), rest: "" }
+            : takeClosedPieces(buffer)
+        );
+
+        const escalate = async function* () {
+          if (assistantContent) yield { kind: "halt" as const };
+          assistantContent = redText;
+          pending = "";
+          riskLevel = "red";
+          yield { kind: "delta" as const, text: assistantContent };
+          for (const text of takeClosedPieces(assistantContent, 180).pieces) {
+            yield { kind: "sentence" as const, text };
+          }
+          const tail = takeClosedPieces(assistantContent, 180).rest;
+          if (tail) {
+            for (const text of speechPieces(tail)) yield { kind: "sentence" as const, text };
+          }
+          try {
+            await db.createEscalation({
+              conversationId,
+              reason: `Richiesta classificata come ROSSA: ${input.message.slice(0, 200)}`,
+              context: contextStr.slice(-1000),
+              status: "pending",
+            });
+            await db.updateConversation(conversationId, { status: "escalated", riskLevel: "red" });
+          } catch (error) {
+            console.error("[ADAM] Escalation non salvata:", error);
+          }
+          try {
+            await notifyOwner({
+              title: "🔴 Escalation ADAM - Richiesta Rossa",
+              content: `Nuova escalation da conversazione #${conversationId}.\nMessaggio: ${input.message.slice(0, 300)}`,
+            });
+          } catch (notifyError) {
+            console.warn("[ADAM] Notifica escalation non inviata:", notifyError);
+          }
+        };
+
+        if (riskLevel === "red") {
+          yield* escalate();
+        } else {
+          try {
+            for await (const delta of streamAnswerText({
+              systemPrompt: systemPrompt + knowledgeContext,
+              messages: prior,
+            })) {
+              if (riskLevel === "red") break;
+              assistantContent += delta;
+              pending += delta;
+              yield { kind: "delta" as const, text: delta };
+              const drained = emitPieces(pending, false);
+              pending = drained.rest;
+              for (const text of drained.pieces) {
+                if (riskLevel === "red") break;
+                yield { kind: "sentence" as const, text };
+              }
+              if (riskLevel === "red") break;
+            }
+          } catch (geminiError) {
+            console.error("[ADAM] Gemini stream failed, using fallback:", geminiError);
+            if (!assistantContent && riskLevel !== "red") {
+              try {
+                const fallbackResponse = await invokeLLM({
+                  messages: [
+                    { role: "system" as const, content: systemPrompt + knowledgeContext },
+                    ...prior,
+                  ],
+                });
+                assistantContent = fallbackResponse.choices[0].message.content as string;
+              } catch (fallbackError) {
+                console.error("[ADAM] Fallback LLM also failed:", fallbackError);
+                assistantContent = "In questo momento l'API gratuita non risponde. Riprova tra poco. Il centralino del Comune è 0144 770111.";
+              }
+              pending = assistantContent;
+              yield { kind: "delta" as const, text: assistantContent };
+            }
+          }
+
+          const settledRisk = riskLevel ?? await riskTask;
+          if (settledRisk === "red") {
+            yield* escalate();
+          } else {
+            if (settledRisk === "yellow") {
+              const note = `\n\n---\n⚠️ *Nota: questa informazione potrebbe richiedere verifica. Ti consigliamo di contattare direttamente l'ufficio competente per conferma.*`;
+              assistantContent += note;
+              yield { kind: "delta" as const, text: note };
+            }
+            for (const text of emitPieces(pending, true).pieces) {
+              yield { kind: "sentence" as const, text };
+            }
+            await db.updateConversation(conversationId, { riskLevel: settledRisk });
+          }
+        }
+
+        let responseType = "neutral";
+        try {
+          responseType = await classifyResponseType(assistantContent, input.message);
+        } catch {
+          // La voce è già partita. Il colore della nebulosa può restare neutro.
+        }
+
+        const finalRisk = riskLevel ?? "green";
+        await db.addMessage({
+          conversationId,
+          role: "assistant",
+          content: assistantContent,
+          riskLevel: finalRisk,
+        });
+
+        yield {
+          kind: "done" as const,
+          conversationId,
+          message: assistantContent,
+          riskLevel: finalRisk,
           responseType,
         };
       }),

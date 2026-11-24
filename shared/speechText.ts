@@ -13,7 +13,39 @@ export function stripForSpeech(text: string): string {
     .trim();
 }
 
-export function speechPieces(text: string, maxLen = 380): string[] {
+/**
+ * Frasi già chiuse da . ! ? e il resto ancora aperto.
+ * Non accorpa le frasi: la prima può andare in voce subito.
+ */
+export function takeClosedPieces(buffer: string, maxLen = 180): { pieces: string[]; rest: string } {
+  const pieces: string[] = [];
+  let rest = buffer;
+
+  while (rest) {
+    const match = rest.match(/^([\s\S]*?[.!?])(?=\s|$)/);
+    if (!match) break;
+    const sentence = stripForSpeech(match[1]);
+    rest = rest.slice(match[1].length).replace(/^\s+/, "");
+    if (!sentence) continue;
+    if (sentence.length <= maxLen) {
+      pieces.push(sentence);
+    } else {
+      for (let i = 0; i < sentence.length; i += maxLen) {
+        pieces.push(sentence.slice(i, i + maxLen));
+      }
+    }
+  }
+
+  if (rest.length >= maxLen) {
+    const cut = stripForSpeech(rest.slice(0, maxLen));
+    if (cut) pieces.push(cut);
+    rest = rest.slice(maxLen).replace(/^\s+/, "");
+  }
+
+  return { pieces, rest };
+}
+
+export function speechPieces(text: string, maxLen = 180): string[] {
   const clean = stripForSpeech(text).slice(0, 8000);
   if (!clean) return [];
 

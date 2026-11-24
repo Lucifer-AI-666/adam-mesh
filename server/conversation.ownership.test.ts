@@ -37,6 +37,8 @@ vi.mock("./db", () => ({
 
 vi.mock("./gemini", () => ({
   callGemini: vi.fn(async () => "Risposta di test"),
+  streamGeminiText: vi.fn(async function* () { yield "Risposta di test"; }),
+  streamAnswerText: vi.fn(async function* () { yield "Risposta di test"; }),
   classifyRiskWithGemini: vi.fn(async () => "green" as const),
   classifyResponseType: vi.fn(async () => "neutral"),
   generateSpeech: vi.fn(),
