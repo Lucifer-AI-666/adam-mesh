@@ -8,7 +8,7 @@ import { useParams } from "wouter";
 import { Mic, MicOff, Volume2, VolumeX, Send, Loader2, Bot, User } from "lucide-react";
 import { toast } from "sonner";
 import { Streamdown } from "streamdown";
-import { speechPieces } from "../../../shared/speechText";
+import { useFastVoice } from "@/hooks/useFastVoice";
 
 function RiskBadge({ level }: { level?: string | null }) {
   if (!level) return null;
@@ -38,32 +38,26 @@ export default function Chat() {
   const [inputText, setInputText] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [ttsEnabled, setTtsEnabled] = useState(true);
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const speechQueueRef = useRef<string[]>([]);
-  const speechTokenRef = useRef(0);
-  const heardAudioRef = useRef(false);
-  const speakNextRef = useRef<(token: number) => void>(() => {});
+  const ttsEnabledRef = useRef(ttsEnabled);
+  ttsEnabledRef.current = ttsEnabled;
+  const [sending, setSending] = useState(false);
+  const streamTokenRef = useRef(0);
 
-  const speakMutation = trpc.chat.speak.useMutation();
-
-  const sendMutation = trpc.chat.send.useMutation({
-    onSuccess: (data) => {
-      setConversationId(data.conversationId);
-      setCurrentRisk(data.riskLevel);
-      setMessages(prev => [
-        ...prev,
-        { role: "assistant", content: data.message, riskLevel: data.riskLevel },
-      ]);
-      if (ttsEnabled && data.message) {
-        speakText(data.message);
-      }
-    },
-  });
+  const utils = trpc.useUtils();
+  const fetchEveAudio = useCallback((text: string) => (
+    utils.client.chat.speak.mutate({ text, voice: "eve" })
+      .then(data => data.audio)
+      .catch(() => null)
+  ), [utils]);
+  const voice = useFastVoice(fetchEveAudio);
+  const { speakText, stopSpeaking, prime, isSpeaking } = voice;
+  const enqueuePieces = useCallback((pieces: string[]) => {
+    if (!ttsEnabledRef.current) return;
+    voice.enqueuePieces(pieces);
+  }, [voice.enqueuePieces]);
 
   // Load existing conversation messages
   const { data: existingMessages } = trpc.chat.getConversation.useQuery(
@@ -86,105 +80,57 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Cleanup audio context on unmount
-  useEffect(() => {
-    return () => {
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
-    };
-  }, []);
-
-  const playPcm = useCallback(async (base64Audio: string, onEnded: () => void) => {
+  const runLive = useCallback(async (text: string) => {
+    const streamToken = ++streamTokenRef.current;
+    stopSpeaking();
+    prime();
+    setSending(true);
+    setMessages(prev => [...prev, { role: "assistant", content: "" }]);
+    let acc = "";
     try {
-      if (!audioContextRef.current || audioContextRef.current.state === "closed") {
-        audioContextRef.current = new AudioContext({ sampleRate: 24000 });
+      const stream = await utils.client.chat.live.query({ conversationId, message: text });
+      for await (const event of stream) {
+        if (streamToken !== streamTokenRef.current) return;
+        if (event.kind === "delta") {
+          acc += event.text;
+          setMessages(prev => {
+            const copy = [...prev];
+            const last = copy[copy.length - 1];
+            if (last?.role === "assistant") copy[copy.length - 1] = { ...last, content: acc };
+            return copy;
+          });
+        } else if (event.kind === "halt") {
+          stopSpeaking();
+          acc = "";
+          setMessages(prev => {
+            const copy = [...prev];
+            const last = copy[copy.length - 1];
+            if (last?.role === "assistant") copy[copy.length - 1] = { ...last, content: "" };
+            return copy;
+          });
+        } else if (event.kind === "sentence") {
+          enqueuePieces([event.text]);
+        } else if (event.kind === "done") {
+          setConversationId(event.conversationId);
+          setCurrentRisk(event.riskLevel);
+          setMessages(prev => {
+            const copy = [...prev];
+            const last = copy[copy.length - 1];
+            if (last?.role === "assistant") {
+              copy[copy.length - 1] = { ...last, content: event.message, riskLevel: event.riskLevel };
+            }
+            return copy;
+          });
+        }
       }
-      const ctx = audioContextRef.current;
-      if (ctx.state === "suspended") await ctx.resume();
-
-      const binaryString = atob(base64Audio);
-      const byteLength = binaryString.length - (binaryString.length % 2);
-      const bytes = new Uint8Array(byteLength);
-      for (let i = 0; i < byteLength; i++) bytes[i] = binaryString.charCodeAt(i);
-
-      const int16Array = new Int16Array(bytes.buffer);
-      const float32Array = new Float32Array(int16Array.length);
-      for (let i = 0; i < int16Array.length; i++) float32Array[i] = int16Array[i] / 32768.0;
-
-      const audioBuffer = ctx.createBuffer(1, float32Array.length, 24000);
-      audioBuffer.getChannelData(0).set(float32Array);
-
-      const source = ctx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(ctx.destination);
-      source.onended = () => {
-        if (currentSourceRef.current === source) currentSourceRef.current = null;
-        onEnded();
-      };
-      currentSourceRef.current = source;
-      source.start();
     } catch (error) {
-      console.warn("[Voce] Errore playback:", error);
-      onEnded();
+      console.error("[Chat] Stream fallito:", error);
+      toast.error("Non riesco a raggiungere ADAM adesso");
+      setMessages(prev => prev.filter((msg, i) => !(i === prev.length - 1 && msg.role === "assistant" && msg.content === "")));
+    } finally {
+      if (streamToken === streamTokenRef.current) setSending(false);
     }
-  }, []);
-
-  const speakNext = useCallback((token: number) => {
-    if (token !== speechTokenRef.current) return;
-    const next = speechQueueRef.current.shift();
-    if (!next) {
-      setIsSpeaking(false);
-      if (!heardAudioRef.current) {
-        toast.info("Voce non disponibile al momento", { duration: 3000 });
-      }
-      return;
-    }
-    speakMutation.mutate(
-      { text: next },
-      {
-        onSuccess: (data) => {
-          if (token !== speechTokenRef.current) return;
-          if (!data.audio) {
-            speakNextRef.current(token);
-            return;
-          }
-          heardAudioRef.current = true;
-          playPcm(data.audio, () => speakNextRef.current(token));
-        },
-        onError: () => {
-          if (token !== speechTokenRef.current) return;
-          speakNextRef.current(token);
-        },
-      }
-    );
-  }, [playPcm, speakMutation]);
-
-  speakNextRef.current = speakNext;
-
-  const speakText = useCallback((text: string) => {
-    const pieces = speechPieces(text);
-    if (!pieces.length) return;
-    if (currentSourceRef.current) {
-      try { currentSourceRef.current.stop(); } catch {}
-      currentSourceRef.current = null;
-    }
-    speechTokenRef.current += 1;
-    heardAudioRef.current = false;
-    speechQueueRef.current = pieces;
-    setIsSpeaking(true);
-    speakNext(speechTokenRef.current);
-  }, [speakNext]);
-
-  const stopSpeaking = useCallback(() => {
-    speechTokenRef.current += 1;
-    speechQueueRef.current = [];
-    if (currentSourceRef.current) {
-      try { currentSourceRef.current.stop(); } catch {}
-      currentSourceRef.current = null;
-    }
-    setIsSpeaking(false);
-  }, []);
+  }, [conversationId, enqueuePieces, prime, stopSpeaking, utils]);
 
   // ============ SPEECH-TO-TEXT (Web Speech API for input) ============
   const startListening = useCallback(() => {
@@ -236,7 +182,7 @@ export default function Chat() {
     if (!text) return;
     setMessages(prev => [...prev, { role: "user", content: text }]);
     setInputText("");
-    sendMutation.mutate({ conversationId, message: text });
+    void runLive(text);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -372,7 +318,7 @@ export default function Chat() {
             </div>
           ))}
 
-          {sendMutation.isPending && (
+          {sending && (
             <div className="flex gap-3 justify-start">
               <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                 <Bot className="h-4 w-4 text-primary" />
@@ -419,11 +365,11 @@ export default function Chat() {
           {/* Send Button */}
           <Button
             onClick={handleSend}
-            disabled={!inputText.trim() || sendMutation.isPending}
+            disabled={!inputText.trim() || sending}
             size="icon"
             className="shrink-0 h-11 w-11 rounded-full"
           >
-            {sendMutation.isPending ? (
+            {sending ? (
               <Loader2 className="h-5 w-5 animate-spin" />
             ) : (
               <Send className="h-5 w-5" />

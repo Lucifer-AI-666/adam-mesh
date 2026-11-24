@@ -3,9 +3,9 @@ import { Button } from "@/components/ui/button";
 import { getLoginUrl } from "@/const";
 import { trpc } from "@/lib/trpc";
 import CosmicNebula, { type NebulaState } from "@/components/CosmicNebula";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "wouter";
-import { speechPieces } from "../../../shared/speechText";
+import { useFastVoice } from "@/hooks/useFastVoice";
 import {
   MessageSquare, Map, Shield, BarChart3, Clock, Zap,
   Send, Mic, MicOff, Volume2, ArrowRight, Activity,
@@ -21,9 +21,7 @@ export default function Home() {
   const [conversationId, setConversationId] = useState<number | undefined>();
   const recognitionRef = useRef<any>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [audioSpeed, setAudioSpeed] = useState(1);
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [showResponseModal, setShowResponseModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -42,126 +40,82 @@ export default function Home() {
     refetchInterval: 30000,
   });
 
-  const speakMutation = trpc.chat.speak.useMutation();
+  const utils = trpc.useUtils();
+  const [sending, setSending] = useState(false);
+  const fetchEveAudio = useCallback((text: string) => (
+    utils.client.chat.speak.mutate({ text, voice: "eve" })
+      .then(data => data.audio)
+      .catch(() => null)
+  ), [utils]);
+  const voice = useFastVoice(fetchEveAudio, audioSpeed);
+  const speakReply = voice.speakText;
+  const stopSpeaking = voice.stopSpeaking;
+  const enqueuePieces = voice.enqueuePieces;
+  const isGeneratingAudio = voice.isFetchingAudio;
+  const isPlayingAudio = voice.isSpeaking;
 
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const speechQueueRef = useRef<string[]>([]);
-  const speechTokenRef = useRef(0);
-  const playNextPieceRef = useRef<(token: number) => void>(() => {});
+  const colorMap: Record<string, NebulaState> = {
+    "in-ascolto": "idle",
+    "elaborazione": "purple",
+    "informativo": "blue",
+    "risposta-sicura": "green",
+    "verifica-necessaria": "yellow",
+    "attenzione": "orange",
+    "escalation": "red",
+    "empatico": "pink",
+    "creativo": "indigo",
+    "importante": "gold",
+    informative: "blue",
+    empathetic: "pink",
+    creative: "indigo",
+    navigational: "blue",
+    important: "gold",
+    neutral: "idle",
+  };
 
-  const playPcm = (base64Audio: string, onEnded: () => void) => {
+  const runLive = async (text: string, existingId?: number) => {
+    const id = existingId ?? conversationId;
+    stopSpeaking();
+    voice.prime();
+    setSending(true);
+    setNebulaState("purple");
+    setLastResponse("");
+    setShowResponseModal(true);
+    let acc = "";
     try {
-      if (!audioContextRef.current || audioContextRef.current.state === "closed") {
-        audioContextRef.current = new AudioContext({ sampleRate: 24000 });
+      const stream = await utils.client.chat.live.query({ conversationId: id, message: text });
+      for await (const event of stream) {
+        if (event.kind === "delta") {
+          acc += event.text;
+          setLastResponse(acc);
+        } else if (event.kind === "halt") {
+          stopSpeaking();
+          acc = "";
+          setLastResponse("");
+        } else if (event.kind === "sentence") {
+          enqueuePieces([event.text]);
+        } else if (event.kind === "done") {
+          setConversationId(event.conversationId);
+          setLastResponse(event.message);
+          setNebulaState(colorMap[event.responseType] || "idle");
+          setTimeout(() => setNebulaState("idle"), 10000);
+        }
       }
-      const ctx = audioContextRef.current;
-      if (ctx.state === "suspended") ctx.resume();
-
-      const binaryString = atob(base64Audio);
-      const byteLength = binaryString.length - (binaryString.length % 2);
-      const bytes = new Uint8Array(byteLength);
-      for (let i = 0; i < byteLength; i++) bytes[i] = binaryString.charCodeAt(i);
-      const int16Array = new Int16Array(bytes.buffer);
-      const float32Array = new Float32Array(int16Array.length);
-      for (let i = 0; i < int16Array.length; i++) float32Array[i] = int16Array[i] / 32768;
-
-      const buffer = ctx.createBuffer(1, float32Array.length, 24000);
-      buffer.getChannelData(0).set(float32Array);
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.playbackRate.value = audioSpeed;
-      source.connect(ctx.destination);
-      source.onended = () => {
-        if (currentSourceRef.current === source) currentSourceRef.current = null;
-        onEnded();
-      };
-      source.start(0);
-      currentSourceRef.current = source;
     } catch (err) {
-      console.error("[Audio] Errore playback:", err);
-      onEnded();
-    }
-  };
-
-  const playNextPiece = (token: number) => {
-    if (token !== speechTokenRef.current) return;
-    const next = speechQueueRef.current.shift();
-    if (!next) {
-      setIsGeneratingAudio(false);
-      setIsPlayingAudio(false);
-      return;
-    }
-    setIsGeneratingAudio(true);
-    speakMutation.mutate(
-      { text: next },
-      {
-        onSuccess: (data) => {
-          if (token !== speechTokenRef.current) return;
-          if (!data.audio) {
-            console.warn("[Voce] Audio non disponibile");
-            playNextPieceRef.current(token);
-            return;
-          }
-          setIsGeneratingAudio(false);
-          setIsPlayingAudio(true);
-          playPcm(data.audio, () => playNextPieceRef.current(token));
-        },
-        onError: (err) => {
-          console.warn("[Voce] Errore:", err.message);
-          if (token !== speechTokenRef.current) return;
-          playNextPieceRef.current(token);
-        },
-      }
-    );
-  };
-
-  playNextPieceRef.current = playNextPiece;
-
-  const speakReply = (text: string) => {
-    const pieces = speechPieces(text);
-    if (!pieces.length) return;
-    speechTokenRef.current += 1;
-    if (currentSourceRef.current) {
-      try { currentSourceRef.current.stop(); } catch {}
-      currentSourceRef.current = null;
-    }
-    speechQueueRef.current = pieces;
-    playNextPiece(speechTokenRef.current);
-  };
-
-  // Chat send mutation
-  const sendMutation = trpc.chat.send.useMutation({
-    onSuccess: (data) => {
-      setConversationId(data.conversationId);
-      setLastResponse(data.message);
-      setShowResponseModal(true);
+      console.error("[Chat] Errore:", err);
       setNebulaState("idle");
-      if (data.responseType) {
-        const colorMap: Record<string, NebulaState> = {
-          "in-ascolto": "idle",
-          "elaborazione": "purple",
-          "informativo": "blue",
-          "risposta-sicura": "green",
-          "verifica-necessaria": "yellow",
-          "attenzione": "orange",
-          "escalation": "red",
-          "empatico": "pink",
-          "creativo": "indigo",
-          "importante": "gold",
-        };
-        setNebulaState(colorMap[data.responseType] || "idle");
-        setTimeout(() => setNebulaState("idle"), 10000);
-      }
-      setTimeout(() => {
-        speakReply(data.message);
-      }, 500);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const sendMutation = {
+    isPending: sending,
+    mutate: (input: { conversationId?: number; message: string }) => {
+      void runLive(input.message, input.conversationId);
     },
-    onError: (err) => {
-      console.error("[Chat] Errore:", err.message);
-      setNebulaState("idle");
-    },
-  });
+  };
+  const speakMutation = { isPending: false };
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -386,8 +340,8 @@ export default function Home() {
                   <button
                     key={q}
                     onClick={() => {
-                      if (!isAuthenticated) { window.location.href = getLoginUrl(); return; }
-                      setInputText(q); setTimeout(() => { sendMutation.mutate({ conversationId, message: q }); }, 100);
+                      setInputText(q);
+                      sendMutation.mutate({ conversationId, message: q });
                     }}
                     disabled={sendMutation.isPending}
                     className="px-3 py-1.5 text-[11px] font-mono text-white/50 border border-white/10 rounded-full hover:border-primary/50 hover:text-primary hover:bg-primary/5 transition-all duration-200 disabled:opacity-30"
@@ -411,8 +365,7 @@ export default function Home() {
 
           {/* Input bar at bottom */}
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-full max-w-xl px-6">
-            {isAuthenticated ? (
-              <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-4 py-2 backdrop-blur-sm">
+            <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-4 py-2 backdrop-blur-sm">
                 <button
                   onClick={isListening ? stopListening : startListening}
                   className={`p-2 rounded-full transition-all ${isListening ? "bg-red-500/20 text-red-400 animate-pulse" : "text-white/40 hover:text-primary"}`}
@@ -435,16 +388,6 @@ export default function Home() {
                   <Send className="h-4 w-4" />
                 </button>
               </div>
-            ) : (
-              <button
-                onClick={handleInstantLogin}
-                className="w-full flex items-center justify-center gap-3 bg-primary/10 border border-primary/30 rounded-full px-6 py-3 text-primary hover:bg-primary/20 transition-all font-mono text-sm"
-              >
-                <Zap className="h-4 w-4" />
-                Entra in ADAM — 1 Click
-                <ArrowRight className="h-4 w-4" />
-              </button>
-            )}
           </div>
         </main>
 
@@ -589,8 +532,8 @@ function HomeMobile({ user, isAuthenticated, stats, nebulaState, inputText, setI
               <button
                 key={q}
                 onClick={() => {
-                  if (!isAuthenticated) { window.location.href = getLoginUrl(); return; }
-                  setInputText(q); setTimeout(() => { sendMutation.mutate({ conversationId: undefined, message: q }); }, 100);
+                  setInputText(q);
+                  sendMutation.mutate({ conversationId: undefined, message: q });
                 }}
                 className="px-3 py-2 text-[10px] font-mono text-white/50 border border-white/10 rounded-lg hover:border-primary/50 hover:text-primary transition-all"
               >
@@ -603,8 +546,7 @@ function HomeMobile({ user, isAuthenticated, stats, nebulaState, inputText, setI
 
       {/* Bottom input */}
       <div className="fixed bottom-0 left-0 right-0 border-t border-white/5 bg-[#030310] p-3">
-        {isAuthenticated ? (
-          <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-3 py-2">
+        <div className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-3 py-2">
             <button
               onClick={isListening ? stopListening : startListening}
               className={`p-1.5 rounded-full transition-all ${isListening ? "bg-red-500/20 text-red-400" : "text-white/40"}`}
@@ -627,15 +569,6 @@ function HomeMobile({ user, isAuthenticated, stats, nebulaState, inputText, setI
               <Send className="h-4 w-4" />
             </button>
           </div>
-        ) : (
-          <button
-            onClick={handleInstantLogin}
-            className="w-full flex items-center justify-center gap-2 bg-primary/10 border border-primary/30 rounded-full px-4 py-2 text-primary text-sm font-mono"
-          >
-            <Zap className="h-4 w-4" />
-            Entra
-          </button>
-        )}
       </div>
     </div>
   );

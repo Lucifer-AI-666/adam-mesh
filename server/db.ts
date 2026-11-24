@@ -1,7 +1,7 @@
 import { eq, desc, sql, and, gte, lte, count } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, civicNodes, conversations, messages, escalations, knowledgeBase, crawlLogs, systemSettings } from "../drizzle/schema";
-import type { InsertCivicNode, InsertConversation, InsertMessage, InsertEscalation, InsertKnowledgeEntry, InsertCrawlLog } from "../drizzle/schema";
+import type { Conversation, Escalation, InsertCivicNode, InsertConversation, InsertMessage, InsertEscalation, InsertKnowledgeEntry, InsertCrawlLog, Message } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -17,6 +17,14 @@ export async function getDb() {
   }
   return _db;
 }
+
+// Conversazioni in RAM quando MySQL non c'è, così la chat e la voce partono lo stesso.
+let memConvSeq = 1;
+let memMsgSeq = 1;
+let memEscSeq = 1;
+const memConversations = new Map<number, Conversation>();
+const memMessages = new Map<number, Message[]>();
+const memEscalations = new Map<number, Escalation>();
 
 // ============ USERS ============
 
@@ -100,27 +108,52 @@ export async function deleteNode(id: number) {
 
 export async function createConversation(conv: InsertConversation) {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
+  if (!db) {
+    const id = memConvSeq++;
+    const now = new Date();
+    memConversations.set(id, {
+      id,
+      userId: conv.userId ?? null,
+      channel: conv.channel ?? "web",
+      riskLevel: conv.riskLevel ?? null,
+      status: conv.status ?? "active",
+      title: conv.title ?? null,
+      createdAt: now,
+      updatedAt: now,
+      resolvedAt: conv.resolvedAt ?? null,
+    });
+    memMessages.set(id, []);
+    return id;
+  }
   const result = await db.insert(conversations).values(conv);
   return result[0].insertId;
 }
 
 export async function getConversationById(id: number) {
   const db = await getDb();
-  if (!db) return undefined;
+  if (!db) return memConversations.get(id);
   const result = await db.select().from(conversations).where(eq(conversations.id, id)).limit(1);
   return result[0];
 }
 
 export async function getUserConversations(userId: number) {
   const db = await getDb();
-  if (!db) return [];
+  if (!db) {
+    return Array.from(memConversations.values())
+      .filter((conv) => conv.userId === userId)
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+  }
   return db.select().from(conversations).where(eq(conversations.userId, userId)).orderBy(desc(conversations.updatedAt));
 }
 
 export async function updateConversation(id: number, data: Partial<InsertConversation>) {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
+  if (!db) {
+    const current = memConversations.get(id);
+    if (!current) return;
+    memConversations.set(id, { ...current, ...data, updatedAt: new Date() });
+    return;
+  }
   await db.update(conversations).set(data).where(eq(conversations.id, id));
 }
 
@@ -128,14 +161,29 @@ export async function updateConversation(id: number, data: Partial<InsertConvers
 
 export async function addMessage(msg: InsertMessage) {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
+  if (!db) {
+    const id = memMsgSeq++;
+    const row: Message = {
+      id,
+      conversationId: msg.conversationId,
+      role: msg.role,
+      content: msg.content,
+      riskLevel: msg.riskLevel ?? null,
+      sources: msg.sources ?? null,
+      createdAt: new Date(),
+    };
+    const list = memMessages.get(msg.conversationId) ?? [];
+    list.push(row);
+    memMessages.set(msg.conversationId, list);
+    return id;
+  }
   const result = await db.insert(messages).values(msg);
   return result[0].insertId;
 }
 
 export async function getConversationMessages(conversationId: number) {
   const db = await getDb();
-  if (!db) return [];
+  if (!db) return memMessages.get(conversationId) ?? [];
   return db.select().from(messages).where(eq(messages.conversationId, conversationId)).orderBy(messages.createdAt);
 }
 
@@ -143,7 +191,23 @@ export async function getConversationMessages(conversationId: number) {
 
 export async function createEscalation(esc: InsertEscalation) {
   const db = await getDb();
-  if (!db) throw new Error("Database not available");
+  if (!db) {
+    const id = memEscSeq++;
+    const now = new Date();
+    memEscalations.set(id, {
+      id,
+      conversationId: esc.conversationId,
+      assignedNodeId: esc.assignedNodeId ?? null,
+      assignedOperatorId: esc.assignedOperatorId ?? null,
+      reason: esc.reason ?? null,
+      context: esc.context ?? null,
+      status: esc.status ?? "pending",
+      notificationSent: esc.notificationSent ?? false,
+      createdAt: now,
+      resolvedAt: esc.resolvedAt ?? null,
+    });
+    return id;
+  }
   const result = await db.insert(escalations).values(esc);
   return result[0].insertId;
 }

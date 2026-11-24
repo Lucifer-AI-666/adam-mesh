@@ -1,6 +1,8 @@
 # Dependencies
 **/node_modules
 .pnpm-store/
+.venv-piper/
+voices/
 
 # Build outputs
 dist/
