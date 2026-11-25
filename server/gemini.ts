@@ -247,7 +247,7 @@ async function* streamGroqText(opts: {
 const FREE_CHAT_URL = "https://text.pollinations.ai/openai";
 
 /**
- * API gratuita senza chiave. Risposta intera, poi la prima frase va in voce.
+ * API gratuita senza chiave. Invia SSE progressivi quando disponibili.
  * Groq e Gemini restano davanti quando c'è una chiave gratuita dell'utente.
  */
 async function* streamFreeText(opts: {
