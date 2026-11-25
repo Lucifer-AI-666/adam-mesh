@@ -258,22 +258,78 @@ async function* streamFreeText(opts: {
     { role: "system", content: opts.systemPrompt },
     ...opts.messages.filter((msg) => msg.role === "user" || msg.role === "assistant"),
   ];
-  const response = await fetch(FREE_CHAT_URL, {
+  const signal = AbortSignal.timeout(25000);
+  const request = (stream: boolean) => fetch(FREE_CHAT_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "openai",
-      stream: false,
+      stream,
       temperature: 0.4,
       messages,
     }),
-    signal: AbortSignal.timeout(25000),
+    signal,
   });
+
+  let response = await request(true);
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.warn("[Free] Streaming API error; retrying without stream:", response.status, errorText.slice(0, 200));
+    response = await request(false);
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
     console.error("[Free] API error:", response.status, errorText.slice(0, 200));
     throw new Error(`Free API error: ${response.status}`);
+  }
+
+  if (response.headers.get("content-type")?.includes("text/event-stream") && response.body) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = "";
+    let yielded = false;
+
+    const parseLine = (line: string): string | null => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) return null;
+      const payload = trimmed.slice(5).trim();
+      if (!payload || payload === "[DONE]") return null;
+      try {
+        const data = JSON.parse(payload) as {
+          choices?: { delta?: { content?: string | null } }[];
+        };
+        return data.choices?.[0]?.delta?.content ?? null;
+      } catch {
+        return null;
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      pending += decoder.decode(value, { stream: true });
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) {
+        const content = parseLine(line);
+        if (content) {
+          yielded = true;
+          yield content;
+        }
+      }
+    }
+
+    pending += decoder.decode();
+    if (pending) {
+      const content = parseLine(pending);
+      if (content) {
+        yielded = true;
+        yield content;
+      }
+    }
+    if (!yielded) throw new Error("Free API stream empty");
+    return;
   }
 
   const data = await response.json() as {
