@@ -2,7 +2,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { getLoginUrl } from "@/const";
 import { cn } from "@/lib/utils";
-import { Menu, X, MessageSquare, Map, History, BarChart3, AlertTriangle, Database, BookOpen, LogOut, Zap } from "lucide-react";
+import { Menu, X, MessageSquare, Map, History, BarChart3, AlertTriangle, Database, BookOpen, LogOut, Zap, Music2 } from "lucide-react";
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 
@@ -14,6 +14,7 @@ export default function Navbar() {
   const publicLinks = [
     { href: "/chat", label: "Chat", icon: MessageSquare },
     { href: "/map", label: "Mappa", icon: Map },
+    { href: "/creative", label: "Studio", icon: Music2 },
   ];
 
   const authLinks = [

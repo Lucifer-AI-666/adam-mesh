@@ -6,6 +6,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Chat from "./pages/Chat";
+import CreativeStudio from "./pages/CreativeStudio";
 import NodesMap from "./pages/NodesMap";
 import History from "./pages/History";
 import Dashboard from "./pages/Dashboard";
@@ -19,6 +20,7 @@ function Router() {
     <Switch>
       <Route path={"/"} component={Home} />
       <Route path={"/chat"} component={Chat} />
+      <Route path={"/creative"} component={CreativeStudio} />
       <Route path={"/chat/:id"} component={Chat} />
       <Route path={"/map"} component={NodesMap} />
       <Route path={"/history"} component={History} />
